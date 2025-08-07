@@ -1158,6 +1158,13 @@ class YaraRuleManager:
                                 any of them
                         }
                         """)
+            # Also fetch OTX rules
+            try:
+                self.fetch_otx_rules()
+                logging.info("OTX rules fetched successfully")
+            except Exception as e:
+                logging.warning(f"Failed to fetch OTX rules: {str(e)}")
+            
             self._rules_loaded = True
             return True
         except Exception as e:
@@ -1278,12 +1285,32 @@ class YaraRuleManager:
                 
                 # Try compiling each file individually to find problematic rules
                 print("\nTrying to identify problematic rules:")
+                valid_filepaths = {}
                 for namespace, rule_path in filepaths.items():
                     print(f"Testing rule file: {namespace} ({rule_path})")
                     try:
                         rule_content = ""
                         with open(rule_path, 'r') as f:
                             rule_content = f.read()
+                            
+                        # Check for include statements that might fail
+                        if 'include' in rule_content.lower():
+                            # Check if any include statements reference missing files
+                            include_matches = re.finditer(r'include\s+"([^"]+)"', rule_content)
+                            has_missing_includes = False
+                            for match in include_matches:
+                                include_path = match.group(1)
+                                # Check if it's a relative path
+                                if include_path.startswith('./') or not os.path.isabs(include_path):
+                                    # Try to resolve relative to the rule file
+                                    resolved_path = os.path.join(os.path.dirname(rule_path), include_path)
+                                    if not os.path.exists(resolved_path):
+                                        print(f"  - SKIPPING: Missing include file {include_path}")
+                                        has_missing_includes = True
+                                        break
+                            
+                            if has_missing_includes:
+                                continue
                             
                         # Look for external declarations
                         file_externals = set()
@@ -1296,9 +1323,21 @@ class YaraRuleManager:
                         # Try to compile just this rule
                         yara.compile(filepath=rule_path, externals=externals)
                         print(f"  - Rule compiles successfully")
+                        valid_filepaths[namespace] = rule_path
                     except Exception as e:
                         print(f"  - ERROR in rule: {str(e)}")
                         self.logger.error(f"Error in rule file '{namespace}' at {rule_path}: {str(e)}")
+                
+                # Try compiling again with only valid rules
+                if valid_filepaths:
+                    print(f"\nRecompiling with {len(valid_filepaths)} valid rules...")
+                    try:
+                        compiled_rules = yara.compile(filepaths=valid_filepaths, externals=externals)
+                        print("YARA rules compiled successfully!")
+                        return compiled_rules
+                    except Exception as e:
+                        print(f"Still failed: {str(e)}")
+                        return None
                 
                 return None
         else:
@@ -1379,59 +1418,117 @@ class YaraRuleManager:
         # Include puzzle verification in final hash
         return hashlib.sha512(assembled + puzzle_key.encode()).hexdigest()
     def fetch_otx_rules(self):
-        otx_dir = self.rules_dir / "otx"
-        otx_dir.mkdir(exist_ok=True)
-        if not (otx_dir / ".git").exists():
-            self.repo_sources['otx-rules'] = 'https://github.com/xosski/OTX-Python-SDK'
-            subprocess.run([
-                'git', 'clone',
-                '--depth', '1',
-                self.repo_sources['otx-rules'],
-                str(otx_dir)
-            ])
-        else:
-            # Optionally update existing repository
-            try:
-                subprocess.run(['git', 'pull'], cwd=str(otx_dir), check=False)
-            except Exception as e:
-                logging.warning(f"Failed to update OTX rules: {str(e)}")
-        
-         # Process YARA files only once
-        if not hasattr(self, '_rules_processed'):
-            for yara_file in otx_dir.glob('**/*.yar*'):
+        """Fetch OTX (Open Threat Exchange) YARA rules and threat indicators"""
+        try:
+            # Convert to pathlib Path if needed
+            if isinstance(self.rules_dir, str):
+                from pathlib import Path
+                rules_dir_path = Path(self.rules_dir)
+            else:
+                rules_dir_path = self.rules_dir
+                
+            otx_dir = rules_dir_path / "otx"
+            otx_dir.mkdir(exist_ok=True)
+            
+            # Fetch OTX YARA rules from a proper YARA rules repository
+            # Using a community YARA rules repo that includes OTX-style rules
+            otx_yara_repo = 'https://github.com/YARA-Rules/rules'
+            yara_rules_dir = otx_dir / "yara-rules"
+            
+            if not (yara_rules_dir / ".git").exists():
                 try:
-                    yara.compile(str(yara_file))
-                    logging.info(f"Loaded YARA rule: {yara_file.name}")
+                    subprocess.run([
+                        'git', 'clone',
+                        '--depth', '1',
+                        otx_yara_repo,
+                        str(yara_rules_dir)
+                    ], check=True, capture_output=True, text=True)
+                    logging.info(f"Successfully cloned OTX YARA rules to {yara_rules_dir}")
+                except subprocess.CalledProcessError as e:
+                    logging.warning(f"Failed to clone OTX YARA rules: {e}")
+                    return
+            else:
+                # Update existing repository
+                try:
+                    subprocess.run(['git', 'pull'], cwd=str(yara_rules_dir), check=False, capture_output=True)
+                    logging.debug("Updated OTX YARA rules repository")
                 except Exception as e:
-                    logging.debug(f"Skipping invalid rule file {yara_file}: {str(e)}")
-            self._rules_processed = True
-        
-        # Load local threat indicators
-        indicators_file = self.rules_dir / "threat_indicators.json"
-        if indicators_file.exists():
-            with open(indicators_file) as f:
-                data = json.load(f)
-                for indicator in data:
-                    self.analyze_threat_indicators(indicator)
-        if hasattr(self, '_otx_fetched') and self._otx_fetched:
-            return
-        # Use API for real-time threat detection
-        threat_url = "https://otx.alienvault.com/api/v1/pulses/6733cb23929b42dfad4f5712"
-        headers = {
-            'X-OTX-API-KEY': 'Insert API Key',
-            'Accept': 'application/json'
-        }
-        
-        # Query for recent threats
-        threat_url = f"{threat_url}/indicators"
-        response = requests.get(threat_url, headers=headers)
-        
-        if response.status_code == 200:
-            data = response.json()
-            for activity in data.get('results', []):
-                if activity.get('indicators'):
-                    self.analyze_threat_indicators(activity)
-        self._otx_fetched = True
+                    logging.debug(f"Failed to update OTX rules: {str(e)}")
+            
+            # Process YARA files and copy relevant ones to our structure
+            if not hasattr(self, '_otx_rules_processed'):
+                otx_rules_count = 0
+                
+                # Look for YARA files in the downloaded repository
+                problematic_rules = ['ip.yar']  # Rules with known compilation issues
+                
+                for yara_file in yara_rules_dir.glob('**/*.yar*'):
+                    if yara_file.is_file() and yara_file.stat().st_size > 0:
+                        # Skip known problematic rules
+                        if yara_file.name in problematic_rules:
+                            logging.debug(f"Skipping known problematic rule: {yara_file.name}")
+                            continue
+                            
+                        try:
+                            # Test if the rule compiles
+                            yara.compile(str(yara_file))
+                            
+                            # Copy useful rules to our malware_rules directory
+                            target_dir = rules_dir_path / "malware_rules"
+                            target_dir.mkdir(exist_ok=True)
+                            
+                            # Use a prefix to identify OTX rules
+                            target_file = target_dir / f"otx_{yara_file.name}"
+                            
+                            # Only copy if not already present
+                            if not target_file.exists():
+                                import shutil
+                                shutil.copy2(yara_file, target_file)
+                                otx_rules_count += 1
+                                logging.debug(f"Copied OTX YARA rule: {yara_file.name}")
+                                
+                        except Exception as e:
+                            logging.debug(f"Skipping invalid OTX rule file {yara_file}: {str(e)}")
+                
+                self._otx_rules_processed = True
+                logging.info(f"Processed {otx_rules_count} OTX YARA rules")
+            
+            # Create local threat indicators file with basic IOCs
+            self._create_basic_threat_indicators(otx_dir)
+            
+            # Mark as completed
+            if not hasattr(self, '_otx_fetched'):
+                self._otx_fetched = True
+                
+        except Exception as e:
+            logging.error(f"Error in fetch_otx_rules: {str(e)}")
+            
+    def _create_basic_threat_indicators(self, otx_dir):
+        """Create basic threat indicators file"""
+        try:
+            indicators_file = otx_dir / "threat_indicators.json"
+            if not indicators_file.exists():
+                basic_indicators = [
+                    {
+                        "type": "hash",
+                        "value": "d41d8cd98f00b204e9800998ecf8427e",
+                        "description": "Empty file MD5 (suspicious)",
+                        "threat_type": "suspicious_file"
+                    },
+                    {
+                        "type": "domain", 
+                        "value": "malicious-domain.example",
+                        "description": "Example malicious domain",
+                        "threat_type": "c2_domain"
+                    }
+                ]
+                
+                with open(indicators_file, 'w') as f:
+                    json.dump(basic_indicators, f, indent=2)
+                    
+                logging.debug(f"Created basic threat indicators file: {indicators_file}")
+        except Exception as e:
+            logging.debug(f"Failed to create threat indicators: {str(e)}")
     def verify_rules_loaded(self):
         """Verify YARA rules are properly loaded and return detailed status"""
         report = {
@@ -1443,20 +1540,33 @@ class YaraRuleManager:
         }
         
         try:
-            # Check directories
-            for category in ['memory_rules', 'shellcode_rules', 'injection_rules', 'malware_rules', 'custom_rules']:
-                category_dir = self.rules_dir / category
+            # Check directories (including OTX)
+            categories = ['memory_rules', 'shellcode_rules', 'injection_rules', 'malware_rules', 'custom_rules', 'otx']
+            for category in categories:
+                if isinstance(self.rules_dir, str):
+                    from pathlib import Path
+                    rules_dir_path = Path(self.rules_dir)
+                else:
+                    rules_dir_path = self.rules_dir
+                    
+                category_dir = rules_dir_path / category
                 if not category_dir.exists():
                     report["directories_exist"] = False
                     report["error_message"] = f"Directory missing: {category_dir}"
                     return report
             
-            # Check for rule files
+            # Check for rule files (including OTX rules)
             rule_count = 0
             for category in ['memory_rules', 'shellcode_rules', 'injection_rules', 'malware_rules', 'custom_rules']:
-                category_dir = self.rules_dir / category
+                category_dir = rules_dir_path / category
                 rule_files = list(category_dir.glob('*.yar')) + list(category_dir.glob('*.yara'))
                 rule_count += len(rule_files)
+                
+            # Also count OTX rules
+            otx_dir = rules_dir_path / "otx" / "yara-rules"
+            if otx_dir.exists():
+                otx_rule_files = list(otx_dir.glob('**/*.yar*'))
+                rule_count += len(otx_rule_files)
             
             report["rule_files_count"] = rule_count
             report["rule_files_exist"] = rule_count > 0

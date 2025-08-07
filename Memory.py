@@ -16,6 +16,7 @@ import win32api
 import win32process
 import win32con
 import win32security
+# from ShellCodeMagic import calculate_entropy  # Moved to function level to avoid circular import
 # import ShellCodeMagic  # Import when needed to avoid circular dependency
 import hashlib
 import re
@@ -58,6 +59,7 @@ SIZE_T = c_size_t
 class MemoryScanner:
     _instance = None
     _initialized = True
+    shared_yara_manager = None  # Class variable to share YARA manager across instances
     kernel32 = ctypes.windll.kernel32
     kernel32: ctypes.WinDLL = ctypes.WinDLL('kernel32')
     VirtualQueryEx = kernel32.VirtualQueryEx
@@ -82,25 +84,26 @@ class MemoryScanner:
         
         if not MemoryScanner._initialized:
             self.gui = self.update_gui_detections()
-            if YaraRuleManager:
-                self.yara_manager = YaraRuleManager()
-            else:
-                self.yara_manager = None
             MemoryScanner._initialized = True
             self.enable_debug_privilege()
             logging.info("MemoryScanner")
+        
+        # Use shared YARA manager if available, otherwise create one
+        if MemoryScanner.shared_yara_manager:
+            self.yara_manager = MemoryScanner.shared_yara_manager
+            logging.info("Using shared YaraRuleManager instance")
+        elif YaraRuleManager and not hasattr(self, 'yara_manager'):
+            self.yara_manager = YaraRuleManager()
+            logging.info("Created new YaraRuleManager instance")
+        else:
+            self.yara_manager = None
+            
         self._initialized = True
         self.executable_found = False
         self.logger = logging.getLogger(__name__)
         self.logger.info("MemoryScanner")
         self.scanner = None
         self.detection_methods = []
-        # Initialize YaraRuleManager directly
-        if YaraRuleManager and not hasattr(self, 'yara_manager'):
-            self.yara_manager = YaraRuleManager()
-            self.yara_manager.fetch_all_rules()
-        elif not hasattr(self, 'yara_manager'):
-            self.yara_manager = None
         self.logger = logging.getLogger(__name__)
         self.logging = self.setup_scanner_logging()
         self.gui = None  # GUI reference not needed in memory scanner
@@ -6827,6 +6830,118 @@ class MemoryScanner:
             "threat_score": threat_score,
             "quarantined": threat_score >= self.quarantine_threshold and self.quarantine_enabled
         }
+        
+    def scan_process_memory_enhanced(self, pid):
+        """Enhanced process memory scanning with force_read_memory_region for deeper analysis"""
+        try:
+            # Check if this is a protected process first
+            if self._is_protected_process(pid):
+                process_name = self.get_process_name(pid)
+                logging.debug(f"Skipping scan of protected process {process_name} (PID: {pid})")
+                return []
+            
+            # Handle string PIDs
+            if isinstance(pid, str):
+                if not pid.isdigit():
+                    logging.debug(f"Processing special named process: {pid}")
+                    return []
+                else:
+                    pid = int(pid)
+            
+            # Try to open the process
+            try:
+                process_handle = win32api.OpenProcess(
+                    win32con.PROCESS_QUERY_INFORMATION | win32con.PROCESS_VM_READ,
+                    False, pid
+                )
+            except Exception as e:
+                # Don't log warnings for protected processes
+                if not self._is_protected_process(pid):
+                    logging.debug(f"Cannot open process {pid}: {str(e)}")
+                return []
+            
+            try:
+                detections = []
+                
+                # Get process info
+                process_info = self._get_process_info_winapi(pid, process_handle)
+                if not process_info:
+                    return []
+                
+                process_name = process_info.get('name', f'PID_{pid}')
+                
+                # Enumerate memory regions
+                memory_regions = self._enumerate_memory_regions_winapi(process_handle)
+                if not memory_regions:
+                    return []
+                
+                # Scan memory regions with enhanced force reading
+                for region in memory_regions:
+                    # Skip non-committed memory
+                    if not (region['State'] & 0x1000):  # MEM_COMMIT
+                        continue
+                    
+                    # Skip regions that are too small
+                    if region['RegionSize'] < 1024:
+                        continue
+                    
+                    # Skip very large regions to avoid performance issues
+                    if region['RegionSize'] > 1024 * 1024 * 100:  # 100MB
+                        continue
+                    
+                    try:
+                        # First try normal memory reading
+                        memory_content = self._read_memory_in_chunks_winapi(
+                            process_handle,
+                            region['BaseAddress'],
+                            region['RegionSize']
+                        )
+                        
+                        # If normal reading fails or returns insufficient data, try force reading
+                        if not memory_content or len(memory_content) < min(region['RegionSize'], 4096):
+                            logging.debug(f"Normal read failed for region 0x{region['BaseAddress']:x}, trying force read")
+                            memory_content = self.force_read_memory_region(
+                                process_handle,
+                                region['BaseAddress'],
+                                min(region['RegionSize'], 1024 * 1024)  # Limit to 1MB for force reading
+                            )
+                        
+                        if memory_content and len(memory_content) > 100:
+                            # Analyze the memory content for shellcode patterns
+                            patterns = self.detect_shellcode_patterns(memory_content)
+                            
+                            if patterns and patterns.get('confidence', 0) > 0.3:
+                                detection = {
+                                    'type': 'Enhanced Shellcode Detection',
+                                    'process': process_name,
+                                    'pid': pid,
+                                    'address': region['BaseAddress'],
+                                    'size': len(memory_content),
+                                    'confidence': patterns.get('confidence', 0),
+                                    'risk': 'High' if patterns.get('confidence', 0) > 0.7 else 'Medium',
+                                    'details': f"Shellcode patterns detected using enhanced scanning: {patterns.get('pattern_types', [])}",
+                                    'shellcode': memory_content[:1024],  # First 1KB for analysis
+                                    'patterns': patterns.get('pattern_types', []),
+                                    'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                }
+                                detections.append(detection)
+                                
+                    except Exception as e:
+                        # Silently continue to next region
+                        continue
+                
+                return detections
+                
+            finally:
+                try:
+                    win32api.CloseHandle(process_handle)
+                except:
+                    pass
+                    
+        except Exception as e:
+            logging.debug(f"Enhanced memory scan failed for PID {pid}: {str(e)}")
+            return []
+    
     def _calculate_threat_score(self, suspicious_patterns, suspicious_regions_count):
         """Calculate a threat score based on suspicious findings"""
         score = 0
@@ -7885,6 +8000,11 @@ class MemoryScanner:
                 
                 if success and bytes_read_chunk.value > 0:
                     memory_data.extend(buffer.raw[:bytes_read_chunk.value])
+                elif not success:
+                    # Try force reading if regular ReadProcessMemory fails
+                    force_buffer = self.force_read_memory_region(process_handle, current_address, current_chunk_size)
+                    if force_buffer:
+                        memory_data.extend(force_buffer)
                 
                 bytes_read += current_chunk_size
                 
@@ -7967,7 +8087,7 @@ class MemoryScanner:
         except Exception as e:
             logging.debug(f"Exception opening process {pid}: {str(e)}")
             return None
-    def validate_pid(pid):
+    def validate_pid(self, pid):
         """Unified PID validation with consistent return values"""
         # First extract PID value from various possible formats
         if pid is None:
@@ -8976,7 +9096,7 @@ class MemoryScanner:
             
             # Try alternative detection methods
             return self.detect_hollowing_alternative(pid)
-         
+    
                
         # Helper function to get module info without recursion
         def get_module_info(process_handle):
@@ -9167,9 +9287,18 @@ class MemoryScanner:
                             
                             if not success:
                                 error_code = ctypes.get_last_error()
-                                logging.error(f"Failed to read process memory for PID {pid}. Error: {error_code}")
-                                hollowing_indicators['reason'] = f'read_process_memory_failed_error_{error_code}'
-                                dos_header = None
+                                logging.debug(f"Regular ReadProcessMemory failed for PID {pid}. Error: {error_code}. Trying force read...")
+                                # Try force reading
+                                force_buffer = self.force_read_memory_region(process_handle, base_address, ctypes.sizeof(dos_header))
+                                if force_buffer and len(force_buffer) >= ctypes.sizeof(dos_header):
+                                    # Copy data to DOS header structure
+                                    ctypes.memmove(ctypes.byref(dos_header), force_buffer, ctypes.sizeof(dos_header))
+                                    success = True
+                                    logging.debug(f"Force read successful for PID {pid}")
+                                else:
+                                    logging.error(f"Both regular and force ReadProcessMemory failed for PID {pid}. Error: {error_code}")
+                                    hollowing_indicators['reason'] = f'read_process_memory_failed_error_{error_code}'
+                                    dos_header = None
                         except Exception as ex:
                             logging.debug(f"Exception reading memory header for {pid}: {str(ex)}")
                             hollowing_indicators['reason'] = 'exception_reading_memory_header'
@@ -9233,8 +9362,15 @@ class MemoryScanner:
                                         memory_pe_header = memory_buffer.raw[:bytes_read.value]
                                     else:
                                         error_code = ctypes.get_last_error()
-                                        logging.error(f"Failed to read memory PE header for PID {pid}. Error: {error_code}")
-                                        hollowing_indicators['reason'] = f'read_pe_header_failed_error_{error_code}'
+                                        logging.debug(f"Regular ReadProcessMemory failed for PE header PID {pid}. Error: {error_code}. Trying force read...")
+                                        # Try force reading for PE header
+                                        force_buffer = self.force_read_memory_region(process_handle, base_address, 4096)
+                                        if force_buffer:
+                                            memory_pe_header = force_buffer
+                                            logging.debug(f"Force read successful for PE header PID {pid}")
+                                        else:
+                                            logging.error(f"Both regular and force ReadProcessMemory failed for PE header PID {pid}. Error: {error_code}")
+                                            hollowing_indicators['reason'] = f'read_pe_header_failed_error_{error_code}'
                                 except Exception as ex:
                                     logging.debug(f"Exception reading memory PE header for {pid}: {str(ex)}")
                                     hollowing_indicators['reason'] = 'exception_reading_memory_pe_header'
@@ -9438,6 +9574,34 @@ class MemoryScanner:
         except Exception as e:
             logging.debug(f"Error getting parent PID for {pid}: {str(e)}")
             return None
+    def force_read_memory_region(self, process_handle, base_address, size):
+        buffer = ctypes.create_string_buffer(size)
+        bytes_read = ctypes.c_size_t()
+        success = ctypes.windll.kernel32.ReadProcessMemory(
+            process_handle,
+            ctypes.c_void_p(base_address),
+            buffer,
+            size,
+            ctypes.byref(bytes_read)
+        )
+        if not success:
+            # Try VirtualProtectEx to change protection and reattempt
+            old_protect = ctypes.c_ulong()
+            ctypes.windll.kernel32.VirtualProtectEx(
+                process_handle,
+                ctypes.c_void_p(base_address),
+                size,
+                0x40,  # PAGE_EXECUTE_READWRITE
+                ctypes.byref(old_protect)
+            )
+            success = ctypes.windll.kernel32.ReadProcessMemory(
+                process_handle,
+                ctypes.c_void_p(base_address),
+                buffer,
+                size,
+                ctypes.byref(bytes_read)
+            )
+        return buffer.raw if success else None
     def _get_parent_pid_using_toolhelp(self, pid):
         """Alternative method to get parent PID using Toolhelp snapshot"""
         TH32CS_SNAPPROCESS = 0x00000002
@@ -10657,9 +10821,16 @@ class MemoryScanner:
         return suspicious_patterns
     def scan_bytes(self, data):
         """Scan a byte array with YARA rules"""
-        self.yara_manager = YaraRuleManager()
-        self.yara_manager.fetch_all_rules()
-        self.yara_manager.combined_rules = self.yara_manager.compile_combined_rules()
+        # Use shared YARA manager if available, otherwise create one
+        if not hasattr(self, 'yara_manager') or self.yara_manager is None:
+            if MemoryScanner.shared_yara_manager:
+                self.yara_manager = MemoryScanner.shared_yara_manager
+                logging.info("Using shared YaraRuleManager for scan_bytes")
+            else:
+                self.yara_manager = YaraRuleManager()
+                self.yara_manager.fetch_all_rules()
+                self.yara_manager.combined_rules = self.yara_manager.compile_combined_rules()
+                logging.info("Created new YaraRuleManager for scan_bytes")
         
         matches = []
         for rule in self.yara_manager.load_yara_rules():
@@ -10988,7 +11159,8 @@ class MemoryScanner:
         match_count = sum(1 for pattern in instruction_patterns if pattern in data)
         
         # Check for reasonable entropy (not encrypted/compressed)
-        entropy = self._calculate_entropy(data)
+        from ShellCodeMagic import calculate_entropy
+        entropy = calculate_entropy(data)
         
         # Valid code typically has some instruction patterns and reasonable entropy
         return match_count >= 3 and 4.0 <= entropy <= 7.5
@@ -11299,18 +11471,6 @@ class MemoryScanner:
         except Exception as e:
             logging.debug(f"Error calculating {hash_type} hash for {file_path}: {str(e)}")
             return None
-    def _calculate_entropy(self, data):
-        """Calculate Shannon entropy of data"""
-        if not data:
-            return 0
-            
-        entropy = 0
-        for x in range(256):
-            p_x = data.count(x) / len(data)
-            if p_x > 0:
-                entropy += -p_x * math.log2(p_x)
-                
-        return entropy
 
     def _find_function_pointer_targets(self, process_handle, memory_regions):
         """
@@ -11657,7 +11817,8 @@ class MemoryScanner:
                 return True
                 
         # Check for code-like entropy
-        entropy = self._calculate_entropy(data)
+        from ShellCodeMagic import calculate_entropy
+        entropy = calculate_entropy(data)
         if 5.0 <= entropy <= 7.0:  # Typical range for code
             # Count instruction-like byte sequences
             instruction_prefixes = [b'\x8B', b'\x89', b'\x8D', b'\xFF', b'\xE8', b'\xE9', b'\xEB', b'\x83', b'\x81']

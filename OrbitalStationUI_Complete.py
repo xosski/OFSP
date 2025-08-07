@@ -92,9 +92,14 @@ class ScanWorker(QThread):
                     
                 try:
                     proc_info = proc.info
+                    proc_name = proc_info.get('name', 'Unknown')
+                    if not proc_name or proc_name.strip() == '':
+                        proc_name = 'Unknown'
+                    proc_pid = proc_info.get('pid', 0)
+                    
                     self.progress_updated.emit(
                         int((i / total) * 100),
-                        f"Scanning: {proc_info['name']} (PID: {proc_info['pid']})"
+                        f"Scanning: {proc_name} (PID: {proc_pid})"
                     )
                     
                     # Simple process analysis
@@ -102,12 +107,16 @@ class ScanWorker(QThread):
                         detection = {
                             'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                             'type': 'Process',
-                            'name': proc_info['name'],
-                            'pid': proc_info['pid'],
+                            'name': proc_name,
+                            'pid': proc_pid,
                             'severity': 'Medium',
                             'description': 'Suspicious process detected'
                         }
                         self.detection_found.emit(detection)
+                        
+                    # Quick memory check for suspicious processes
+                    if proc_name.lower() in ['cmd.exe', 'powershell.exe', 'rundll32.exe']:
+                        self._analyze_process_memory(proc_pid)
                         
                     time.sleep(0.01)  # Small delay to prevent UI freezing
                     
@@ -115,6 +124,7 @@ class ScanWorker(QThread):
                     continue
                     
             self.progress_updated.emit(100, "Quick scan completed")
+            self.scan_completed.emit([])
             
         except Exception as e:
             self.progress_updated.emit(0, f"Quick scan error: {str(e)}")
@@ -131,9 +141,14 @@ class ScanWorker(QThread):
                     
                 try:
                     proc_info = proc.info
+                    proc_name = proc_info.get('name', 'Unknown')
+                    if not proc_name or proc_name.strip() == '':
+                        proc_name = 'Unknown'
+                    proc_pid = proc_info.get('pid', 0)
+                    
                     self.progress_updated.emit(
                         int((i / total) * 100),
-                        f"Deep scanning: {proc_info['name']} (PID: {proc_info['pid']})"
+                        f"Deep scanning: {proc_name} (PID: {proc_pid})"
                     )
                     
                     # Analyze process and memory
@@ -141,8 +156,8 @@ class ScanWorker(QThread):
                         detection = {
                             'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                             'type': 'Process',
-                            'name': proc_info['name'],
-                            'pid': proc_info['pid'],
+                            'name': proc_name,
+                            'pid': proc_pid,
                             'severity': 'High',
                             'description': 'Suspicious process with memory anomalies'
                         }
@@ -150,7 +165,7 @@ class ScanWorker(QThread):
                         
                     # Memory analysis if available
                     if self.parent_ui.memory_scanner:
-                        self._analyze_process_memory(proc_info['pid'])
+                        self._analyze_process_memory(proc_pid)
                         
                     time.sleep(0.02)  # Slightly longer delay for deep scan
                     
@@ -158,6 +173,7 @@ class ScanWorker(QThread):
                     continue
                     
             self.progress_updated.emit(100, "Deep scan completed")
+            self.scan_completed.emit([])
             
         except Exception as e:
             self.progress_updated.emit(0, f"Deep scan error: {str(e)}")
@@ -180,9 +196,39 @@ class ScanWorker(QThread):
         return False
         
     def _analyze_process_memory(self, pid):
-        """Analyze process memory"""
-        # This would use the Memory module for actual analysis
-        pass
+        """Analyze process memory for shellcode"""
+        try:
+            from Memory import MemoryScanner
+            # Use shared memory scanner if available
+            if hasattr(self.parent_ui, 'memory_scanner') and self.parent_ui.memory_scanner:
+                memory_scanner = self.parent_ui.memory_scanner
+            else:
+                memory_scanner = MemoryScanner()
+            
+            # Perform enhanced memory scanning for shellcode
+            detections = memory_scanner.scan_process_memory_enhanced(pid)
+            
+            for detection in detections:
+                # Format detection for the UI
+                formatted_detection = {
+                    'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    'type': f"Shellcode - {detection.get('type', 'Unknown')}",
+                    'name': detection.get('process', 'Unknown'),
+                    'pid': pid,
+                    'severity': 'High',
+                    'description': f"Shellcode detected: {detection.get('details', 'No details')}",
+                    'address': detection.get('address', 0),
+                    'size': detection.get('size', 0),
+                    'confidence': detection.get('confidence', 'Unknown'),
+                    'risk': detection.get('risk', 'High'),
+                    'shellcode': detection.get('shellcode', b''),
+                    'patterns': detection.get('patterns', [])
+                }
+                self.detection_found.emit(formatted_detection)
+                
+        except Exception as e:
+            # Don't emit error for memory analysis failures as they're common
+            pass
 
 class FilesystemScanWorker(QThread):
     """Worker thread for filesystem scanning operations"""
@@ -418,7 +464,11 @@ class OrbitalStationUI(QMainWindow):
         # Initialize YARA manager
         if YaraRuleManager:
             try:
-                self.yara_manager = YaraRuleManager.YaraRuleManager()
+                # Use shared YARA manager to avoid recompilation
+                if hasattr(self.memory_scanner, 'shared_yara_manager') and self.memory_scanner.shared_yara_manager:
+                    self.yara_manager = self.memory_scanner.shared_yara_manager
+                else:
+                    self.yara_manager = YaraRuleManager.YaraRuleManager()
                 # Ensure the rules directory is set before calling methods
                 if not hasattr(self.yara_manager, 'rules_dir'):
                     self.yara_manager.rules_dir = Path("yara_rules")
@@ -430,6 +480,22 @@ class OrbitalStationUI(QMainWindow):
                 self.compiled_rules = self.yara_manager.compile_combined_rules()
                 self.rules_loaded = self.compiled_rules is not None
                 print(f"YARA Manager initialized - Rules loaded: {self.rules_loaded}")
+                
+                # Share this YARA manager with other components to prevent recompilation
+                try:
+                    import Memory
+                    Memory.MemoryScanner.shared_yara_manager = self.yara_manager
+                    print("Shared YaraRuleManager with MemoryScanner")
+                except ImportError:
+                    pass
+                    
+                try:
+                    import ShellCodeMagic
+                    if hasattr(ShellCodeMagic, 'ShellcodeDetector'):
+                        ShellCodeMagic.ShellcodeDetector.shared_yara_manager = self.yara_manager
+                        print("Shared YaraRuleManager with ShellcodeDetector")
+                except ImportError:
+                    pass
             except Exception as e:
                 print(f"YARA initialization error: {e}")
                 self.yara_manager = None
@@ -626,6 +692,7 @@ class OrbitalStationUI(QMainWindow):
         self._create_process_tab()
         self._create_detections_tab()
         self._create_scan_results_tab()
+        self._create_scan_status_tab()
         self._create_yara_tab()
         self._create_quarantine_tab()
         self._create_logs_tab()
@@ -1614,6 +1681,167 @@ class OrbitalStationUI(QMainWindow):
         
         self.tabs.addTab(widget, "Logs")
         
+    def _create_scan_status_tab(self):
+        """Create scan status and live detection monitoring tab"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        
+        # Scan controls frame
+        controls_frame = QGroupBox("🔍 Active Scans")
+        controls_layout = QVBoxLayout(controls_frame)
+        
+        # Scan status display
+        self.scan_status_text = QTextEdit()
+        self.scan_status_text.setMaximumHeight(150)
+        self.scan_status_text.setReadOnly(True)
+        self.scan_status_text.append("💤 No active scans")
+        controls_layout.addWidget(self.scan_status_text)
+        
+        # Quick control buttons
+        buttons_layout = QHBoxLayout()
+        
+        self.start_memory_scan_btn = QPushButton("🧠 Start Memory Scan")
+        self.start_memory_scan_btn.clicked.connect(self._scan_memory_for_shellcode)
+        buttons_layout.addWidget(self.start_memory_scan_btn)
+        
+        self.start_process_scan_btn = QPushButton("🔍 Scan Process")
+        self.start_process_scan_btn.clicked.connect(self._scan_process_for_shellcode)
+        buttons_layout.addWidget(self.start_process_scan_btn)
+        
+        self.start_deep_scan_btn = QPushButton("🔬 Deep Scan")
+        self.start_deep_scan_btn.clicked.connect(self._deep_shellcode_scan)
+        buttons_layout.addWidget(self.start_deep_scan_btn)
+        
+        self.clear_detections_btn = QPushButton("🧹 Clear")
+        self.clear_detections_btn.clicked.connect(self._clear_scan_results)
+        buttons_layout.addWidget(self.clear_detections_btn)
+        
+        controls_layout.addLayout(buttons_layout)
+        layout.addWidget(controls_frame)
+        
+        # Live detections frame
+        detections_frame = QGroupBox("📊 Live Detection Results")
+        detections_layout = QVBoxLayout(detections_frame)
+        
+        # Detection table
+        self.live_detections_table = QTableWidget(0, 7)
+        self.live_detections_table.setHorizontalHeaderLabels([
+            "Timestamp", "Type", "Process", "Address", "Confidence", "Risk", "Size"
+        ])
+        self.live_detections_table.horizontalHeader().setStretchLastSection(True)
+        self.live_detections_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.live_detections_table.itemSelectionChanged.connect(self._update_live_detection_details)
+        detections_layout.addWidget(self.live_detections_table)
+        
+        # Detection details
+        details_frame = QGroupBox("🔍 Detection Details")
+        details_layout = QVBoxLayout(details_frame)
+        
+        self.live_detection_details = QTextEdit()
+        self.live_detection_details.setMaximumHeight(200)
+        self.live_detection_details.setReadOnly(True)
+        self.live_detection_details.setText("Select a detection to view details")
+        details_layout.addWidget(self.live_detection_details)
+        
+        detections_layout.addWidget(details_frame)
+        layout.addWidget(detections_frame)
+        
+        self.tabs.addTab(widget, "📊 Live Scans")
+        
+    def _clear_scan_results(self):
+        """Clear scan results and status"""
+        self.live_detections_table.setRowCount(0)
+        self.scan_status_text.clear()
+        self.scan_status_text.append("💤 Results cleared")
+        self.live_detection_details.setText("Select a detection to view details")
+        
+    def _update_live_detection_details(self):
+        """Update live detection details when selection changes"""
+        try:
+            current_row = self.live_detections_table.currentRow()
+            if current_row < 0:
+                return
+                
+            timestamp_item = self.live_detections_table.item(current_row, 0)
+            if not timestamp_item:
+                return
+                
+            # Get detection data stored in UserRole
+            detection = timestamp_item.data(Qt.UserRole) if hasattr(timestamp_item, 'data') else None
+            if not detection:
+                self.live_detection_details.setText("No detailed information available")
+                return
+            
+            # Format detection details
+            details = f"🔍 Detection Details:\n\n"
+            details += f"Type: {detection.get('type', 'Unknown')}\n"
+            details += f"Process: {detection.get('process', 'Unknown')}\n"
+            details += f"Address: 0x{detection.get('address', 0):08x}\n"
+            details += f"Size: {detection.get('size', 0)} bytes\n"
+            details += f"Confidence: {detection.get('confidence', 'Unknown')}\n"
+            details += f"Risk Level: {detection.get('risk', 'Unknown')}\n"
+            
+            if detection.get('details'):
+                details += f"\nDetails: {detection.get('details')}\n"
+                
+            if detection.get('patterns'):
+                details += f"\nPatterns Detected: {len(detection.get('patterns', []))}\n"
+                
+            self.live_detection_details.setText(details)
+            
+        except Exception as e:
+            self.live_detection_details.setText(f"Error loading details: {str(e)}")
+            
+    def _add_live_detection(self, detection):
+        """Add detection to live scan results table"""
+        try:
+            # Update scan status
+            process_name = detection.get('process', 'Unknown')
+            detection_type = detection.get('type', 'Unknown')
+            self.scan_status_text.append(f"🎯 Detection: {detection_type} in {process_name}")
+            
+            # Add to live detections table
+            current_row = self.live_detections_table.rowCount()
+            self.live_detections_table.insertRow(current_row)
+            
+            timestamp = detection.get('timestamp', datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+            process = detection.get('process', 'Unknown')
+            address = detection.get('address', 'N/A')
+            confidence = detection.get('confidence', 'Unknown')
+            risk = detection.get('risk', 'Medium')
+            size = detection.get('size', 0)
+            
+            items = [
+                QTableWidgetItem(timestamp),
+                QTableWidgetItem(detection_type),
+                QTableWidgetItem(process),
+                QTableWidgetItem(f"0x{address:08x}" if isinstance(address, int) else str(address)),
+                QTableWidgetItem(str(confidence)),
+                QTableWidgetItem(str(risk)),
+                QTableWidgetItem(f"{size} bytes")
+            ]
+            
+            for col, item in enumerate(items):
+                self.live_detections_table.setItem(current_row, col, item)
+                
+            # Color coding by risk level
+            if str(risk).lower() == 'high':
+                color = QColor('#ff4444')
+            elif str(risk).lower() == 'medium':
+                color = QColor('#ffaa44')
+            else:
+                color = QColor('#44ff44')
+            items[5].setBackground(color)
+            
+            # Store detection data for detailed view
+            items[0].setData(Qt.UserRole, detection)
+            
+            # Auto-scroll to new detection
+            self.live_detections_table.scrollToBottom()
+            
+        except Exception as e:
+            self.scan_status_text.append(f"❌ Error adding live detection: {str(e)}")
+        
     # === SCAN METHODS ===
     
     def start_quick_scan(self):
@@ -1624,6 +1852,10 @@ class OrbitalStationUI(QMainWindow):
         self.scanning = True
         self._update_scan_ui_start()
         
+        # Update live scan status
+        if hasattr(self, 'scan_status_text'):
+            self.scan_status_text.append("🚀 Starting quick scan...")
+            
         self.scan_worker = ScanWorker("quick", self)
         self.scan_worker.progress_updated.connect(self._update_scan_progress)
         self.scan_worker.detection_found.connect(self._add_detection)
@@ -1638,6 +1870,10 @@ class OrbitalStationUI(QMainWindow):
         self.scanning = True
         self._update_scan_ui_start()
         
+        # Update live scan status
+        if hasattr(self, 'scan_status_text'):
+            self.scan_status_text.append("🔬 Starting deep scan with memory analysis...")
+            
         self.scan_worker = ScanWorker("deep", self)
         self.scan_worker.progress_updated.connect(self._update_scan_progress)
         self.scan_worker.detection_found.connect(self._add_detection)
@@ -1674,10 +1910,26 @@ class OrbitalStationUI(QMainWindow):
         self.scan_progress.setValue(progress)
         self.status_message.setText(message)
         
+        # Also update live scan status if available
+        if hasattr(self, 'scan_status_text'):
+            self.scan_status_text.append(f"📊 {message} ({progress}%)")
+        
     def _scan_completed(self, results):
         """Handle scan completion"""
         self.scanning = False
         self._update_scan_ui_end()
+        
+        # Update live scan status if available
+        if hasattr(self, 'scan_status_text'):
+            self.scan_status_text.append(f"✅ Scan completed! {len(self.detections)} total detections found")
+            
+        # Update scan summary if available
+        if hasattr(self, 'summary_stats_label'):
+            self.summary_stats_label.setText(
+                f"📊 Files Scanned: {getattr(self, 'files_scanned', 0)} | "
+                f"Threats Found: {self.threats_found} | "
+                f"Clean Files: {getattr(self, 'files_scanned', 0) - self.threats_found}"
+            )
         
         # Refresh process list after scan
         self._smart_refresh_processes()
@@ -1703,6 +1955,14 @@ class OrbitalStationUI(QMainWindow):
         
         for col, item in enumerate(items):
             self.detections_table.setItem(row, col, QTableWidgetItem(str(item)))
+            
+        # Also add to live scan tab if available
+        if hasattr(self, 'live_detections_table'):
+            self._add_live_detection(detection)
+            
+        # Add to shellcode detection tab if it's a shellcode detection
+        if 'shellcode' in detection.get('type', '').lower():
+            self._add_shellcode_detection(detection)
             
     # === FILE SCANNER METHODS ===
     
@@ -3008,25 +3268,70 @@ class OrbitalStationUI(QMainWindow):
             # Clear previous results
             self.shellcode_table.setRowCount(0)
             
-            # Scan system memory (this is a simplified example)
-            # In a real implementation, you'd scan actual memory regions
+            # Use the actual memory scanner for proper detection
             import psutil
+            from Memory import MemoryScanner
+            
+            # Use existing memory scanner if available, otherwise create one
+            if hasattr(self, 'memory_scanner') and self.memory_scanner:
+                memory_scanner = self.memory_scanner
+                self.log_output.append("Using existing memory scanner with shared YARA rules...")
+            else:
+                memory_scanner = MemoryScanner()
+                self.log_output.append("Created new memory scanner...")
+            scan_count = 0
+            detection_count = 0
+            
+            # Protected process list - more comprehensive than the basic check
+            protected_processes = [
+                'System', 'Registry', 'Idle', 'smss.exe', 'csrss.exe', 
+                'wininit.exe', 'services.exe', 'lsass.exe', 'winlogon.exe',
+                'System Idle Process', 'dwm.exe', 'explorer.exe'
+            ]
             
             for proc in psutil.process_iter(['pid', 'name', 'memory_info']):
                 try:
-                    if proc.info['name'] in ['System', 'Registry']:
+                    name = proc.info['name']
+                    pid = proc.info['pid']
+                    
+                    # Skip protected/system processes
+                    if name in protected_processes:
                         continue
                         
-                    # Simulate memory scanning (replace with actual memory reading)
-                    detections = detector.detect_shellcode_in_memory(b"", proc.info['pid'], proc.info['name'])
-                    
-                    for detection in detections:
-                        self._add_shellcode_detection(detection)
+                    # Skip very low PIDs (usually system processes)
+                    if pid < 100 and pid not in []:  # Allow specific low PIDs if needed
+                        continue
                         
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    continue
+                    # Skip processes with very high memory usage (likely system processes)
+                    try:
+                        memory_info = proc.info.get('memory_info')
+                        if memory_info and memory_info.rss > 1024 * 1024 * 500:  # 500MB+
+                            continue
+                    except:
+                        pass
                     
-            self.log_output.append("✅ Memory shellcode scan completed")
+                    scan_count += 1
+                    
+                    # Update status
+                    self.log_output.append(f"📊 Scanning process: {name} (PID: {pid})")
+                    if hasattr(self, 'scan_status_text'):
+                        self.scan_status_text.append(f"🔍 Scanning: {name} (PID: {pid})")
+                    
+                    # Perform actual memory scanning with enhanced mode
+                    detections = memory_scanner.scan_process_memory_enhanced(pid)
+                    
+                    if detections:
+                        for detection in detections:
+                            self._add_shellcode_detection(detection)
+                            self._add_live_detection(detection)
+                            detection_count += 1
+                            
+                except (psutil.NoSuchProcess, psutil.AccessDenied, PermissionError):
+                    continue
+                except Exception as e:
+                    self.log_output.append(f"⚠️ Error scanning {proc.info.get('name', 'Unknown')}: {str(e)}")
+                    
+            self.log_output.append(f"✅ Memory scan completed - {scan_count} processes scanned, {detection_count} detections found")
             
         except ImportError:
             QMessageBox.warning(self, "Module Error", "ShellCodeMagic module not available")
@@ -3068,14 +3373,15 @@ class OrbitalStationUI(QMainWindow):
             
             self.log_output.append(f"🔍 Scanning process {name} (PID: {pid}) for shellcode...")
             
-            from ShellCodeMagic import ShellcodeDetector
-            detector = ShellcodeDetector()
+            from Memory import MemoryScanner
+            memory_scanner = MemoryScanner()
             
-            # Simulate process memory scan
-            detections = detector.detect_shellcode_in_memory(b"", pid, name)
+            # Perform enhanced process memory scan with force reading
+            detections = memory_scanner.scan_process_memory_enhanced(pid)
             
             for detection in detections:
                 self._add_shellcode_detection(detection)
+                self._add_live_detection(detection)
                 
             self.log_output.append(f"✅ Process {name} shellcode scan completed")
             
@@ -3320,10 +3626,39 @@ class OrbitalStationUI(QMainWindow):
             if not detection:
                 return
             
+            # Check if this is a tome spell that needs full details
+            if 'id' in detection and not detection.get('shellcode'):
+                try:
+                    # This is a tome spell, get full details including pattern_data
+                    spell_details = self.shellcode_tome.get_spell_details(detection['id'])
+                    if spell_details and 'pattern_data' in spell_details:
+                        # Extract the original detection data from pattern_data
+                        original_detection = spell_details['pattern_data']
+                        # Merge the spell metadata with the original detection data
+                        detection.update(original_detection)
+                except Exception as e:
+                    self.log_output.append(f"❌ Error loading spell details: {str(e)}")
+            
             # Update Raw Magic (Hex) view
             shellcode_bytes = detection.get('shellcode', b'')
+            
+            # Try alternative keys for shellcode data
+            if not shellcode_bytes:
+                shellcode_bytes = detection.get('data', b'')
+            if not shellcode_bytes:
+                shellcode_bytes = detection.get('raw_data', b'')
+            if not shellcode_bytes:
+                shellcode_bytes = detection.get('memory_content', b'')
+                
             if isinstance(shellcode_bytes, str):
-                shellcode_bytes = shellcode_bytes.encode('latin-1', errors='ignore')
+                # Try to decode hex string if it's a hex representation
+                if all(c in '0123456789abcdefABCDEF' for c in shellcode_bytes.replace(' ', '')):
+                    try:
+                        shellcode_bytes = bytes.fromhex(shellcode_bytes.replace(' ', ''))
+                    except ValueError:
+                        shellcode_bytes = shellcode_bytes.encode('latin-1', errors='ignore')
+                else:
+                    shellcode_bytes = shellcode_bytes.encode('latin-1', errors='ignore')
             
             hex_output = ""
             if shellcode_bytes:

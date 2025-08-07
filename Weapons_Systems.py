@@ -6,7 +6,8 @@ from pathlib import Path
 import ctypes
 from typing import List
 from YaraRuleManager import YaraRuleManager
-
+# Removed incorrect import - force_read_memory_region is a method of MemoryScanner
+from ShellCodeMagic import calculate_entropy  
 class MalwareScanner:
     def __init__(self):
         self.signature_db = set()
@@ -65,6 +66,7 @@ class MalwareScanner:
         return True
 
     def detect_shellcode(self, memory_content, base_address=0):
+        memory_data = memory_content
         shellcode_indicators = {
             'found': False,
             'patterns': [],
@@ -99,7 +101,7 @@ class MalwareScanner:
             characteristics.append('position_independent')
             shellcode_indicators['risk_level'] += 2
 
-        entropy = self._calculate_entropy(memory_content)
+        entropy = calculate_entropy(memory_content)
         if entropy > 7.0:
             characteristics.append('high_entropy')
             shellcode_indicators['risk_level'] += 2

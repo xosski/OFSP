@@ -11,7 +11,8 @@ from datetime import datetime
 import logging
 from pathlib import Path
 import psutil
-
+import Memory
+# Removed incorrect import - force_read_memory_region is a method of MemoryScanner
 # Import from our modules
 from shared_constants import *
 try:
@@ -120,7 +121,8 @@ class ScannerGui:
         # Setup GUI after all initialization is complete
         if not hasattr(self, 'notebook'):  # Only setup GUI once
             self.setup_gui()
-            
+        
+        self.scanner = MemoryScanner()
         # Start protection
         self.initial_protection()
         

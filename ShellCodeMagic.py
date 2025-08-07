@@ -85,15 +85,85 @@ class ShellcodeCapture:
                 self.shellcode_tome[shellcode_hash]['memory_addresses'].append(start_addr)
         
         return shellcode_hash
-    
-    def get_shellcode(self, shellcode_id):
-        """Retrieve a specific shellcode entry from the tome"""
-        return self.shellcode_tome.get(shellcode_id)
-    
-    def list_all_shellcodes(self):
-        """Returns a list of all shellcode IDs in the tome"""
-        return list(self.shellcode_tome.keys())
-    
+    def list_all_shellcodes(self, memory_regions_dict):
+        self.MagicAnalyzer = MagicAnalyzer()
+        
+        """Scans multiple memory regions and lists all detected shellcode using the existing analyzers and detection patterns. Args:memory_regions_dict: Dictionary mapping region names to (memory_data, base_address) tuples Returns:
+            Dictionary of region names to lists of detected shellcode"""
+        results = {}
+        
+        for region_name, (memory_data, base_address) in memory_regions_dict.items():
+            # Initialize results for this region
+            results[region_name] = []
+            
+            # Skip empty regions
+            if not memory_data:
+                continue
+                
+            # Check memory with the magic analyzer
+            magic_analysis = self.MagicAnalyzer.analyze_memory(memory_data)
+            if magic_analysis and "shellcode" in magic_analysis.lower():
+                shellcode_entry = self.Detector._create_shellcode_entry(
+                    memory_data, 
+                    base_address, 
+                    region_name, 
+                    "magic_detection"
+                )
+                results[region_name].append(shellcode_entry)
+                
+            # Check for shellcode patterns with regex
+            for pattern_name, pattern in self.shellcode_patterns.items():
+                matches = self.Detector._find_pattern_matches(memory_data, pattern)
+                for match_start, match_end in matches:
+                    # Extract the shellcode with some context
+                    extract_start = max(0, match_start - 16)
+                    extract_end = min(len(memory_data), match_end + 64)
+                    shellcode_fragment = memory_data[extract_start:extract_end]
+                    
+                    shellcode_entry = self.Detector._create_shellcode_entry(
+                        shellcode_fragment,
+                        base_address + extract_start,
+                        region_name,
+                        f"pattern_match:{pattern_name}"
+                    )
+                    results[region_name].append(shellcode_entry)
+                    
+            # Apply heuristic detection
+            if len(memory_data) >= 10:
+                # Check for NOP sleds
+                nop_sled_results = self.Detector._detect_nop_sleds(memory_data, base_address)
+                results[region_name].extend(nop_sled_results)
+                
+                # Check for API usage patterns common in shellcode
+                api_pattern_results = self.Detector._detect_api_patterns(memory_data, base_address)
+                results[region_name].extend(api_pattern_results)
+                
+                # Look for characteristic shellcode encoders/decoders
+                decoder_results = self.Detector._detect_shellcode_decoders(memory_data, base_address)
+                results[region_name].extend(decoder_results)
+                
+            # Check for executable memory indicators
+            if self.Detector._is_likely_executable(memory_data):
+                executable_regions = self.Detector._analyze_executable_content(
+                    memory_data, 
+                    base_address,
+                    region_name
+                )
+                results[region_name].extend(executable_regions)
+                
+            # Apply your custom detection engine
+            custom_detections = self.Detector.scan_for_shellcode(
+                memory_data,
+                base_address,
+                region_name
+            )
+            results[region_name].extend(custom_detections)
+            
+            # Store all detected shellcode in the tome
+            for shellcode_entry in results[region_name]:
+                self.Detector._add_to_tome(shellcode_entry['id'], shellcode_entry)
+                
+        return results
     def export_tome(self, filename):
         """Export the shellcode tome to a file"""
         import json
@@ -270,197 +340,6 @@ class OTXSubmitter:
             )
             results['pulse'] = pulse_result
             
-        return results
-class ShellcodeDetector:
-    def __init__(self):
-        self.root = None
-        self.shellcode_tome = {}  # Dictionary to store discovered shellcode
-        try:
-            from Memory import MemoryScanner as RealMemoryScanner
-            self.scanner = RealMemoryScanner()
-        except ImportError:
-            self.scanner = MemoryScanner()  # Use dummy scanner
-        # Common shellcode patterns/signatures
-        self.shellcode_patterns = [
-            # Common x86/x64 shellcode patterns
-            rb'\x31\xc0[\x00-\xff]{0,10}\x50[\x00-\xff]{0,10}\x68',  # xor eax,eax + push eax + push DWORD
-            rb'\x48\x31\xc0[\x00-\xff]{0,15}\x50',                   # x64 xor rax,rax + push
-            rb'\x31\xd2[\x00-\xff]{0,10}\x31\xc0',                   # xor edx,edx + xor eax,eax
-            rb'\x68.{4}\xc3',                                         # push + ret
-            rb'\x68.{4}\xc3',                                         # push + ret 
-            rb'\xe8.{4}',                                             # call instruction with offset
-            rb'\xeb\x0e',                                             # jmp short
-            rb'\x90{5,}',                                             # NOP sled
-        ]
-        # Remove circular reference - this class IS the detector
-        self.Magic = MagicAnalyzer()
-    def detect_shellcode_in_memory(self, memory_region, pid=0, process_name="Unknown", base_address=0):
-        """
-        Detect potential shellcode in a memory region
-        
-        Args:
-            memory_region: Bytes object containing memory data
-            pid: Process ID 
-            process_name: Name of the process
-            base_address: The starting address of this memory region
-            
-        Returns:
-            List of dictionaries containing detected shellcode entries
-        """
-        detected_shellcodes = []
-        
-        # Skip if memory region is empty or None
-        if not memory_region:
-            return detected_shellcodes
-            
-        # Search for known shellcode patterns
-        for pattern in self.shellcode_patterns:
-            for match in re.finditer(pattern, memory_region):
-                # Extract shellcode with context (expand to include surrounding bytes)
-                start_pos = max(0, match.start() - 16)
-                end_pos = min(len(memory_region), match.end() + 64)
-                
-                shellcode_fragment = memory_region[start_pos:end_pos]
-                fragment_addr = base_address + start_pos
-                
-                # Create a unique ID
-                shellcode_hash = hashlib.sha256(shellcode_fragment).hexdigest()[:16]
-                
-                # Create shellcode entry
-                shellcode_entry = {
-                    'id': shellcode_hash,
-                    'data': shellcode_fragment,
-                    'address': fragment_addr,
-                    'size': len(shellcode_fragment),
-                    'pattern_matched': binascii.hexlify(match.group(0)).decode('utf-8'),
-                    'region_name': process_name,
-                    'detection_time': datetime.now()
-                }
-                
-                # Add to results
-                detected_shellcodes.append(shellcode_entry)
-                
-                # Optionally store in the tome
-                self._add_to_tome(shellcode_hash, shellcode_entry)
-                
-        return detected_shellcodes
-    
-    def _add_to_tome(self, shellcode_id, shellcode_entry):
-        """Internal method to add detected shellcode to the tome"""
-        if shellcode_id not in self.shellcode_tome:
-            self.shellcode_tome[shellcode_id] = {
-                'data': shellcode_entry['data'],
-                'size': shellcode_entry['size'],
-                'hex': binascii.hexlify(shellcode_entry['data']).decode('utf-8'),
-                'first_seen': datetime.now(),
-                'seen_count': 1,
-                'locations': [{
-                    'address': shellcode_entry['address'],
-                    'region_name': shellcode_entry['region_name']
-                }]
-            }
-        else:
-            # Update existing entry
-            self.shellcode_tome[shellcode_id]['seen_count'] += 1
-            location = {
-                'address': shellcode_entry['address'],
-                'region_name': shellcode_entry['region_name']
-            }
-            if location not in self.shellcode_tome[shellcode_id]['locations']:
-                self.shellcode_tome[shellcode_id]['locations'].append(location)
-    
-    def get_shellcode(self, memory_region, base_address=0, region_name="Unknown"):
-        """
-        Get shellcode from a specific memory region
-        
-        Args:
-            memory_region: The memory buffer to scan
-            base_address: Starting address of the memory region
-            region_name: Name or identifier for this region
-            
-        Returns:
-            List of detected shellcode objects
-        """
-        return self.detect_shellcode_in_memory(memory_region, base_address, region_name)
-    
-    def list_all_shellcodes(self, memory_regions_dict):
-        self.MagicAnalyzer = MagicAnalyzer()
-        
-        """Scans multiple memory regions and lists all detected shellcode using the existing analyzers and detection patterns. Args:memory_regions_dict: Dictionary mapping region names to (memory_data, base_address) tuples Returns:
-            Dictionary of region names to lists of detected shellcode"""
-        results = {}
-        
-        for region_name, (memory_data, base_address) in memory_regions_dict.items():
-            # Initialize results for this region
-            results[region_name] = []
-            
-            # Skip empty regions
-            if not memory_data:
-                continue
-                
-            # Check memory with the magic analyzer
-            magic_analysis = self.MagicAnalyzer.analyze_memory(memory_data)
-            if magic_analysis and "shellcode" in magic_analysis.lower():
-                shellcode_entry = self.Detector._create_shellcode_entry(
-                    memory_data, 
-                    base_address, 
-                    region_name, 
-                    "magic_detection"
-                )
-                results[region_name].append(shellcode_entry)
-                
-            # Check for shellcode patterns with regex
-            for pattern_name, pattern in self.shellcode_patterns.items():
-                matches = self.Detector._find_pattern_matches(memory_data, pattern)
-                for match_start, match_end in matches:
-                    # Extract the shellcode with some context
-                    extract_start = max(0, match_start - 16)
-                    extract_end = min(len(memory_data), match_end + 64)
-                    shellcode_fragment = memory_data[extract_start:extract_end]
-                    
-                    shellcode_entry = self.Detector._create_shellcode_entry(
-                        shellcode_fragment,
-                        base_address + extract_start,
-                        region_name,
-                        f"pattern_match:{pattern_name}"
-                    )
-                    results[region_name].append(shellcode_entry)
-                    
-            # Apply heuristic detection
-            if len(memory_data) >= 10:
-                # Check for NOP sleds
-                nop_sled_results = self.Detector._detect_nop_sleds(memory_data, base_address)
-                results[region_name].extend(nop_sled_results)
-                
-                # Check for API usage patterns common in shellcode
-                api_pattern_results = self.Detector._detect_api_patterns(memory_data, base_address)
-                results[region_name].extend(api_pattern_results)
-                
-                # Look for characteristic shellcode encoders/decoders
-                decoder_results = self.Detector._detect_shellcode_decoders(memory_data, base_address)
-                results[region_name].extend(decoder_results)
-                
-            # Check for executable memory indicators
-            if self.Detector._is_likely_executable(memory_data):
-                executable_regions = self.Detector._analyze_executable_content(
-                    memory_data, 
-                    base_address,
-                    region_name
-                )
-                results[region_name].extend(executable_regions)
-                
-            # Apply your custom detection engine
-            custom_detections = self.Detector.scan_for_shellcode(
-                memory_data,
-                base_address,
-                region_name
-            )
-            results[region_name].extend(custom_detections)
-            
-            # Store all detected shellcode in the tome
-            for shellcode_entry in results[region_name]:
-                self.Detector._add_to_tome(shellcode_entry['id'], shellcode_entry)
-                
         return results
 class MagicAnalyzer:
     def __init__(self):
@@ -700,11 +579,6 @@ class ShellcodeDetector:
             return detected_shellcodes
             
         # Search for known shellcode patterns
-        import re
-        import hashlib
-        import binascii
-        from datetime import datetime
-        
         for pattern in self.shellcode_patterns:
             for match in re.finditer(pattern, memory_region):
                 # Extract shellcode with context (expand to include surrounding bytes)
@@ -731,9 +605,8 @@ class ShellcodeDetector:
                 # Add to results
                 detected_shellcodes.append(shellcode_entry)
                 
-                # Store in the internal tome
-                if hasattr(self, 'shellcode_tome'):
-                    self.shellcode_tome[shellcode_hash] = shellcode_entry
+                # Optionally store in the tome
+                self._add_to_tome(shellcode_hash, shellcode_entry)
                 
         return detected_shellcodes
 
