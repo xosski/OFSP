@@ -144,6 +144,3 @@ VirusTotal Rule Generator
 If you have crafted a rule that caught something no one else saw —
 you’ve done more than contribute. You’ve remembered.
 
----
-
-Would you like this converted into a template version (`YARA_RULE_TEMPLATE.yar`) for contributors to clone? Or added 
