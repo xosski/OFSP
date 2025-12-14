@@ -439,10 +439,7 @@ class OrbitalStationUI(QMainWindow):
         self.setWindowTitle("Orbital Station: Malware Defense Console")
         self.setGeometry(100, 100, 1400, 900)
         
-        # Initialize backend components first
-        self._init_backend()
-        
-        # Initialize GUI variables
+        # Initialize GUI variables first (before backend)
         self.scanning = False
         self.monitoring_active = False
         self.total_processes_scanned = 0
@@ -450,9 +447,27 @@ class OrbitalStationUI(QMainWindow):
         self.detections = []
         self.scan_worker = None
         
-        # Setup styling and create UI
+        # Pre-initialize backend attributes to None
+        self.memory_scanner = None
+        self.yara_manager = None
+        self.rules_loaded = False
+        self.compiled_rules = None
+        self.shellcode_detector = None
+        self.shellcode_tome = None
+        self.code_disassembler = None
+        self.threat_quarantine = None
+        self.malware_scanner = None
+        
+        # Setup styling and create UI FIRST (so user sees something)
         self._setup_styling()
         self._create_ui()
+        
+        # Show the window immediately
+        self.show()
+        QApplication.processEvents()
+        
+        # Now initialize backend components (with progress feedback)
+        self._init_backend()
         
         # Initialize protection systems
         self.initial_protection()
@@ -461,11 +476,21 @@ class OrbitalStationUI(QMainWindow):
         """Initialize all backend components"""
         print("Initializing backend components...")
         
+        # Initialize memory scanner FIRST (before YARA manager tries to use it)
+        self.memory_scanner = None
+        if Memory:
+            try:
+                self.memory_scanner = Memory.MemoryScanner()
+                print("Memory scanner initialized")
+            except Exception as e:
+                print(f"Memory scanner initialization error: {e}")
+                self.memory_scanner = None
+        
         # Initialize YARA manager
         if YaraRuleManager:
             try:
                 # Use shared YARA manager to avoid recompilation
-                if hasattr(self.memory_scanner, 'shared_yara_manager') and self.memory_scanner.shared_yara_manager:
+                if self.memory_scanner and hasattr(self.memory_scanner, 'shared_yara_manager') and self.memory_scanner.shared_yara_manager:
                     self.yara_manager = self.memory_scanner.shared_yara_manager
                 else:
                     self.yara_manager = YaraRuleManager.YaraRuleManager()
@@ -482,20 +507,19 @@ class OrbitalStationUI(QMainWindow):
                 print(f"YARA Manager initialized - Rules loaded: {self.rules_loaded}")
                 
                 # Share this YARA manager with other components to prevent recompilation
-                try:
-                    import Memory
-                    Memory.MemoryScanner.shared_yara_manager = self.yara_manager
-                    print("Shared YaraRuleManager with MemoryScanner")
-                except ImportError:
-                    pass
+                if Memory and hasattr(Memory, 'MemoryScanner'):
+                    try:
+                        Memory.MemoryScanner.shared_yara_manager = self.yara_manager
+                        print("Shared YaraRuleManager with MemoryScanner")
+                    except Exception:
+                        pass
                     
-                try:
-                    import ShellCodeMagic
-                    if hasattr(ShellCodeMagic, 'ShellcodeDetector'):
+                if ShellCodeMagic and hasattr(ShellCodeMagic, 'ShellcodeDetector'):
+                    try:
                         ShellCodeMagic.ShellcodeDetector.shared_yara_manager = self.yara_manager
                         print("Shared YaraRuleManager with ShellcodeDetector")
-                except ImportError:
-                    pass
+                    except Exception:
+                        pass
             except Exception as e:
                 print(f"YARA initialization error: {e}")
                 self.yara_manager = None
@@ -503,17 +527,6 @@ class OrbitalStationUI(QMainWindow):
         else:
             self.yara_manager = None
             self.rules_loaded = False
-            
-        # Initialize memory scanner
-        if Memory:
-            try:
-                self.memory_scanner = Memory.MemoryScanner()
-                print("Memory scanner initialized")
-            except Exception as e:
-                print(f"Memory scanner initialization error: {e}")
-                self.memory_scanner = None
-        else:
-            self.memory_scanner = None
             
         # Initialize shellcode detection components
         if ShellCodeMagic:
@@ -696,6 +709,96 @@ class OrbitalStationUI(QMainWindow):
         self._create_yara_tab()
         self._create_quarantine_tab()
         self._create_logs_tab()
+        self._create_donation_tab()
+        
+    def _create_donation_tab(self):
+        """Create donation/support tab"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setAlignment(Qt.AlignCenter)
+        
+        # Spacer at top
+        layout.addStretch()
+        
+        # Main donation frame
+        donation_frame = QGroupBox("Support Orbital Station Development")
+        donation_frame.setStyleSheet("""
+            QGroupBox {
+                font-size: 18px;
+                font-weight: bold;
+                color: #00ff88;
+                border: 2px solid #00ff88;
+                border-radius: 10px;
+                margin-top: 20px;
+                padding: 20px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 20px;
+                padding: 0 10px;
+            }
+        """)
+        donation_layout = QVBoxLayout(donation_frame)
+        donation_layout.setSpacing(20)
+        
+        # Thank you message
+        thanks_label = QLabel("Thank you for using Orbital Station!")
+        thanks_label.setStyleSheet("font-size: 16px; color: #ffffff; font-weight: bold;")
+        thanks_label.setAlignment(Qt.AlignCenter)
+        donation_layout.addWidget(thanks_label)
+        
+        # Description
+        desc_label = QLabel(
+            "Your support helps us continue developing and improving\n"
+            "Orbital Station's malware detection capabilities.\n\n"
+            "Every contribution makes a difference!"
+        )
+        desc_label.setStyleSheet("font-size: 14px; color: #cccccc;")
+        desc_label.setAlignment(Qt.AlignCenter)
+        donation_layout.addWidget(desc_label)
+        
+        # Donation button
+        donate_btn = QPushButton("💖 Support the Project")
+        donate_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #6772e5;
+                color: white;
+                font-size: 18px;
+                font-weight: bold;
+                padding: 15px 40px;
+                border-radius: 8px;
+                border: none;
+            }
+            QPushButton:hover {
+                background-color: #7b85e8;
+            }
+            QPushButton:pressed {
+                background-color: #5469d4;
+            }
+        """)
+        donate_btn.setCursor(Qt.PointingHandCursor)
+        donate_btn.clicked.connect(self._open_donation_link)
+        donation_layout.addWidget(donate_btn, alignment=Qt.AlignCenter)
+        
+        # Link info
+        link_label = QLabel("Secure payment via Stripe")
+        link_label.setStyleSheet("font-size: 12px; color: #888888;")
+        link_label.setAlignment(Qt.AlignCenter)
+        donation_layout.addWidget(link_label)
+        
+        layout.addWidget(donation_frame)
+        
+        # Spacer at bottom
+        layout.addStretch()
+        
+        self.tabs.addTab(widget, "💖 Support")
+    
+    def _open_donation_link(self):
+        """Open the donation link in the default browser"""
+        import webbrowser
+        webbrowser.open("https://buy.stripe.com/28EbJ1f7ceo3ckyeES5kk00")
+        if hasattr(self, 'log_output'):
+            self.log_output.append("💖 Thank you for considering a donation!")
         
     def _create_status_bar(self, parent_layout):
         """Create status bar with system information"""
@@ -1935,10 +2038,16 @@ class OrbitalStationUI(QMainWindow):
         self._smart_refresh_processes()
         
     def _add_detection(self, detection):
-        """Add a new detection to the table"""
+        """Add a new detection to all relevant tables and logs"""
         self.detections.append(detection)
         self.threats_found += 1
         self.threats_label.setText(f"Threats: {self.threats_found}")
+        
+        # Log the detection
+        if hasattr(self, 'log_output'):
+            severity = detection.get('severity', 'Medium')
+            icon = "🔴" if severity == 'High' else "🟡" if severity == 'Medium' else "🟢"
+            self.log_output.append(f"{icon} Detection: {detection.get('type', 'Unknown')} - {detection.get('name', 'Unknown')} (PID: {detection.get('pid', 'N/A')})")
         
         # Add to detections table
         row = self.detections_table.rowCount()
@@ -1954,14 +2063,26 @@ class OrbitalStationUI(QMainWindow):
         ]
         
         for col, item in enumerate(items):
-            self.detections_table.setItem(row, col, QTableWidgetItem(str(item)))
+            table_item = QTableWidgetItem(str(item))
+            # Color code by severity
+            severity = detection.get('severity', 'Medium')
+            if severity == 'High':
+                table_item.setBackground(QColor('#ff4444'))
+            elif severity == 'Medium':
+                table_item.setBackground(QColor('#ffaa44'))
+            self.detections_table.setItem(row, col, table_item)
+        
+        # Also add to scan results table if available
+        if hasattr(self, 'scan_results_table'):
+            self._add_to_scan_results(detection)
             
         # Also add to live scan tab if available
         if hasattr(self, 'live_detections_table'):
             self._add_live_detection(detection)
             
-        # Add to shellcode detection tab if it's a shellcode detection
-        if 'shellcode' in detection.get('type', '').lower():
+        # Add to shellcode detection tab if it's a shellcode/memory detection
+        detection_type = detection.get('type', '').lower()
+        if 'shellcode' in detection_type or 'memory' in detection_type or 'injection' in detection_type:
             self._add_shellcode_detection(detection)
             
     # === FILE SCANNER METHODS ===
@@ -2016,7 +2137,7 @@ class OrbitalStationUI(QMainWindow):
     # === MEMORY ANALYSIS METHODS ===
     
     def _analyze_memory(self):
-        """Analyze process memory"""
+        """Analyze process memory with enhanced shellcode detection"""
         pid_text = self.pid_input.text().strip()
         if not pid_text:
             QMessageBox.warning(self, "Error", "Please enter a Process ID")
@@ -2029,48 +2150,63 @@ class OrbitalStationUI(QMainWindow):
                 return
                 
             self.memory_output.clear()
-            self.memory_output.append(f"Analyzing memory for PID {pid}...\n")
+            self.memory_output.append(f"🔍 Analyzing memory for PID {pid}...\n")
             
             if self.memory_scanner:
-                # Perform actual memory analysis
-                self.memory_output.append("Memory scanner is available - performing analysis...")
+                self.memory_output.append("Memory scanner is available - performing enhanced analysis...")
                 try:
-                    # Check if process exists
                     import psutil
                     proc = psutil.Process(pid)
-                    self.memory_output.append(f"Process found: {proc.name()} (PID: {pid})")
+                    proc_name = proc.name()
+                    self.memory_output.append(f"Process found: {proc_name} (PID: {pid})")
                     
-                    # Perform basic memory analysis
+                    # Basic memory info
                     memory_info = proc.memory_info()
-                    self.memory_output.append(f"Memory usage: {memory_info.rss // (1024*1024)} MB")
-                    self.memory_output.append(f"Virtual memory: {memory_info.vms // (1024*1024)} MB")
+                    self.memory_output.append(f"📊 Memory usage: {memory_info.rss // (1024*1024)} MB")
+                    self.memory_output.append(f"📊 Virtual memory: {memory_info.vms // (1024*1024)} MB")
                     
-                    # Check for suspicious behavior patterns
                     try:
-                        # Get process executable path
                         exe_path = proc.exe()
-                        self.memory_output.append(f"Executable: {exe_path}")
-                        
-                        # Check process status
-                        status = proc.status()
-                        self.memory_output.append(f"Status: {status}")
-                        
-                        # Get CPU usage
-                        cpu_percent = proc.cpu_percent()
-                        self.memory_output.append(f"CPU usage: {cpu_percent}%")
-                        
-                        # Basic analysis complete
-                        self.memory_output.append("Memory analysis completed.")
-                        
+                        self.memory_output.append(f"📂 Executable: {exe_path}")
+                        self.memory_output.append(f"📊 Status: {proc.status()}")
                     except psutil.AccessDenied:
-                        self.memory_output.append("Access denied to some process information (requires elevated privileges)")
+                        self.memory_output.append("⚠️ Limited access (some info requires admin)")
+                    
+                    # Enhanced memory scan with shellcode detection
+                    self.memory_output.append("\n🔬 Starting enhanced shellcode detection...")
+                    try:
+                        detections = self.memory_scanner.scan_process_memory_enhanced(pid)
+                        
+                        if detections:
+                            self.memory_output.append(f"\n⚠️ Found {len(detections)} suspicious patterns:\n")
+                            for detection in detections:
+                                self.memory_output.append(f"  🎯 {detection.get('type', 'Unknown')}")
+                                self.memory_output.append(f"     Address: 0x{detection.get('address', 0):08x}")
+                                self.memory_output.append(f"     Confidence: {detection.get('confidence', 0)}%")
+                                self.memory_output.append(f"     Risk: {detection.get('risk', 'Unknown')}")
+                                self.memory_output.append(f"     Size: {detection.get('size', 0)} bytes")
+                                self.memory_output.append("")
+                                
+                                # Add to detections system
+                                detection['name'] = proc_name
+                                detection['pid'] = pid
+                                detection['severity'] = detection.get('risk', 'Medium')
+                                detection['description'] = detection.get('details', f"Shellcode detected at 0x{detection.get('address', 0):08x}")
+                                self._add_detection(detection)
+                        else:
+                            self.memory_output.append("\n✅ No suspicious shellcode patterns detected")
+                            
+                    except Exception as scan_error:
+                        self.memory_output.append(f"⚠️ Enhanced scan error: {str(scan_error)}")
+                    
+                    self.memory_output.append("\n✅ Memory analysis completed.")
                     
                 except psutil.NoSuchProcess:
-                    self.memory_output.append(f"Process with PID {pid} not found")
+                    self.memory_output.append(f"❌ Process with PID {pid} not found")
                 except Exception as e:
-                    self.memory_output.append(f"Error during memory analysis: {str(e)}")
+                    self.memory_output.append(f"❌ Error during memory analysis: {str(e)}")
             else:
-                self.memory_output.append("Memory scanner not available")
+                self.memory_output.append("❌ Memory scanner not available")
                 
         except ValueError:
             QMessageBox.warning(self, "Error", "Please enter a valid numeric Process ID")
@@ -2162,14 +2298,19 @@ class OrbitalStationUI(QMainWindow):
                             self.memory_output.append(f"    - {warning}")
                         self.memory_output.append("")
                         
-                        # Add to detections pane
+                        # Add to detections pane with correct field names
                         detection_data = {
-                            'timestamp': datetime.now().strftime('%H:%M:%S'),
-                            'process': name,
-                            'pid': str(pid),
-                            'threat': 'Suspicious Process',
+                            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                            'type': 'Memory Scan',
+                            'name': name,
+                            'pid': pid,
                             'severity': 'Medium' if suspicious_score < 5 else 'High',
-                            'details': '; '.join(warnings)
+                            'description': '; '.join(warnings),
+                            'process': name,
+                            'address': 0,
+                            'size': memory_info.rss if memory_info else 0,
+                            'confidence': min(suspicious_score * 20, 100),
+                            'risk': 'Medium' if suspicious_score < 5 else 'High'
                         }
                         self._add_detection(detection_data)
                     else:
@@ -2785,6 +2926,18 @@ class OrbitalStationUI(QMainWindow):
             self.log_output.append(f"Protection initialization error: {str(e)}")
 
     # === SCAN RESULTS TAB METHODS ===
+    
+    def _add_to_scan_results(self, detection):
+        """Add detection to scan results table (converts detection format to scan results format)"""
+        threat_info = {
+            'name': detection.get('name', detection.get('type', 'Unknown')),
+            'path': detection.get('path', f"PID: {detection.get('pid', 'N/A')}"),
+            'type': detection.get('type', 'Detection'),
+            'severity': detection.get('severity', 'Medium'),
+            'action': 'Detected',
+            'details': detection.get('description', detection.get('details', ''))
+        }
+        self._add_to_scan_results_tab(threat_info)
     
     def _add_to_scan_results_tab(self, threat_info):
         """Add threat to the dedicated scan results tab"""
@@ -4139,5 +4292,5 @@ class OrbitalStationUI(QMainWindow):
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     ui = OrbitalStationUI()
-    ui.show()
+    # show() is called inside __init__ now
     sys.exit(app.exec())

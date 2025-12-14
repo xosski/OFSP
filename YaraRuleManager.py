@@ -103,52 +103,33 @@ class YaraRuleManager:
         
         logging.debug("=== YaraRuleManager Initialization ===")
         logging.debug(f"Rules directory: {self.rules_dir}")
-        logging.debug("Initializing rule sources:")
         
-        for source, url in self.repo_sources.items():
-            logging.debug(f"  {source}: {url}")
-        
-        # Add this line to fetch GitHub rules during initialization
+        # Simplified initialization - focus on local rules first
         try:
-            self.fetch_github_rules()
-        except Exception as e:
-            logging.error(f"Error fetching GitHub rules: {str(e)}")
-        try:
-            # Create directories and fetch rules
+            # Create directories
             self.create_repo_directories()
-            self.fetch_github_rules()
             
-            # If no rules were loaded from repos, create defaults
-            if not self.are_rules_loaded():
-                self._create_default_rules()
-                
-            # Finally compile all rules
-            self.combined_rules = self.compile_combined_rules()
-        except Exception as e:
-            logging.error(f"Error during rule initialization: {str(e)}")  
-        try:
-            # Direct approach: create basic rules that are guaranteed to work
-            print("Initializing YARA rules with basic detection patterns...")
+            # Create basic rules that are guaranteed to work
+            logging.info("Initializing YARA rules with basic detection patterns...")
             self.create_basic_rules()
-            
-            # Try to compile these basic rules
-            self.combined_rules = self.compile_combined_rules()
-            
-            # Set rules as loaded if compilation succeeded
-            self._rules_loaded = self.combined_rules is not None
             self.create_missing_rules()
-    
-            # Now compile all rules
+            
+            # Compile rules
             self.combined_rules = self.compile_combined_rules()
-            self._rules_loaded = True
-            self._rules_loaded = hasattr(self, 'combined_rules') and self.combined_rules is not None
+            self._rules_loaded = self.combined_rules is not None
+            
             if self._rules_loaded:
                 logging.info("YARA rules loaded successfully")
             else:
-                logging.warning("YARA rules not properly loaded")
+                logging.warning("YARA rules compilation returned None - using defaults")
+                self._create_default_rules()
+                self.combined_rules = self.compile_combined_rules()
+                self._rules_loaded = self.combined_rules is not None
+                
         except Exception as e:
-            logging.error(f"Error creating missing rules: {str(e)}")
-            self._rules_loaded = False           
+            logging.error(f"Error during rule initialization: {str(e)}")
+            self._rules_loaded = False
+            self.combined_rules = None           
     def process_yara_files(self, directory: Path):
       
       self.combined_rules = self.compile_combined_rules()
@@ -1158,12 +1139,13 @@ class YaraRuleManager:
                                 any of them
                         }
                         """)
-            # Also fetch OTX rules
-            try:
-                self.fetch_otx_rules()
-                logging.info("OTX rules fetched successfully")
-            except Exception as e:
-                logging.warning(f"Failed to fetch OTX rules: {str(e)}")
+            # Skip network-based OTX rules fetch during initialization
+            # Can be called manually later if needed
+            # try:
+            #     self.fetch_otx_rules()
+            #     logging.info("OTX rules fetched successfully")
+            # except Exception as e:
+            #     logging.warning(f"Failed to fetch OTX rules: {str(e)}")
             
             self._rules_loaded = True
             return True
@@ -1442,16 +1424,21 @@ class YaraRuleManager:
                         '--depth', '1',
                         otx_yara_repo,
                         str(yara_rules_dir)
-                    ], check=True, capture_output=True, text=True)
+                    ], check=True, capture_output=True, text=True, timeout=30)
                     logging.info(f"Successfully cloned OTX YARA rules to {yara_rules_dir}")
+                except subprocess.TimeoutExpired:
+                    logging.warning("OTX YARA rules clone timed out after 30 seconds")
+                    return
                 except subprocess.CalledProcessError as e:
                     logging.warning(f"Failed to clone OTX YARA rules: {e}")
                     return
             else:
                 # Update existing repository
                 try:
-                    subprocess.run(['git', 'pull'], cwd=str(yara_rules_dir), check=False, capture_output=True)
+                    subprocess.run(['git', 'pull'], cwd=str(yara_rules_dir), check=False, capture_output=True, timeout=15)
                     logging.debug("Updated OTX YARA rules repository")
+                except subprocess.TimeoutExpired:
+                    logging.debug("OTX rules update timed out")
                 except Exception as e:
                     logging.debug(f"Failed to update OTX rules: {str(e)}")
             

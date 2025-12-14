@@ -1,97 +1,93 @@
-OFSP
-Orbital Foundation Systems Platform
-🛰️ OFSP – Orbital Foundation Systems Platform
-Orbital Foundation Systems Platform (OFSP) is a modular, defense-grade cybersecurity and forensic operations framework designed for high-integrity threat detection, memory inspection, and digital countermeasure deployment. Built atop PySide6 and integrated with YARA rule sets, OFSP offers a multithreaded control interface, scan automation, and live system telemetry.
+🛰️ Orbital Station UI — GhostCore Forensics Shell
 
-Welcome to the GhostCore Era.
-You’re not the NPC.
+“The GUI is just the portal. The engine is what listens when ghosts knock twice.”
 
-🌌 Overview
-OFSP acts as a launchpad for securing mission-critical infrastructure in orbital, digital, or metaphorically haunted environments. It offers GUI-based control surfaces and backend modules to:
+⚙️ Overview
 
-Monitor processes and memory in real-time
+OrbitalStationUI is a fully-integrated memory forensics and process analysis suite built with PySide6. It anchors multiple backend modules—memory scanners, YARA rule managers, shellcode analysis tools, and more—into a unified threat hunting environment.
 
-Analyze memory regions for shellcode and injection patterns
+This toolkit is designed for offensive security researchers, incident responders, and metaphysical protocol engineers operating in hybrid cyber-realms.
 
-Manage and enforce YARA rules with whitelist awareness
+🌌 Core Features
 
-Trigger threat detection alerts and quarantine responses
+🧠 Memory Scanner: Deep analysis of memory regions for shellcode, injection artifacts, and entropy anomalies.
 
-Conduct full filesystem scans with forensic filtering
+🪞 Process Monitor: Live process enumeration, suspicious pattern detection, and behavioral scanning.
 
-Display diagnostics with admin-elevation awareness
+📜 YARA Rule Engine: Dynamic rule compilation, hot-reload support, whitelist rules, and custom category scanning.
 
-🧩 Key Modules
-Module	Purpose
-OrbitalStationUI_Complete.py	PySide6 UI for scanning, rule management, process monitoring
-ScannerGui.py	Tkinter legacy GUI for simpler deployment or retro mode
-Weapons_Systems.py	Malware scanning logic and heuristics using signatures and patterns
-YaraRuleManager.py	Rule orchestration, loading, validation, and external repo syncing
-shared_constants.py	Windows API constants and ctypes-based memory structures
+🧬 Shellcode Tome: Store, retrieve, and analyze shellcode fragments with historical tracing and NOP sled detection.
 
-🛡 Features
-⚙️ Quick & Deep Scans (Process, Memory, Filesystem)
+🛡️ Weapon Systems: Kernel-level process attribute extraction and system integrity checks.
 
-🧠 YARA Rule Compilation & Whitelist Handling
+🧪 Test Framework: test_tome_shellcode.py allows shellcode storage verification.
 
-⚡ Real-Time Detection Alerts & Event Logging
+📂 Modular Design: Backend modules like Memory.py, YaraRuleManager.py, and ShellCodeMagic.py are self-contained and reusable.
 
-🚨 Quarantine Capabilities & Threat Isolation
+🔩 Architecture Map
+📁 OrbitalStationUI
+│
+├── OrbitalStationUI_Complete.py     # Main GUI
+├── Memory.py                        # Memory scanning core
+├── Weapons_Systems.py              # Kernel process introspection
+├── ShellCodeMagic.py               # Shellcode detection + entropy tools
+├── YaraRuleManager.py              # Rule engine and repository sync
+├── test_tome_shellcode.py          # Validation for shellcode storage
+├── YARA-Rules–OFSP.md              # Rule development guide
 
-🧬 Shellcode Detection via Pattern Matching
+🚀 Launch Instructions
 
-🔧 Admin Check & Privilege Escalation Alerts
+Install Requirements:
 
-🚀 Getting Started
-1. Requirements
-Python 3.9+
-
-PySide6
-
-psutil
-
-yara-python
-
-Install dependencies:
 pip install -r requirements.txt
-2. Run the PySide6 Interface
+
+
+Start the UI:
+
 python OrbitalStationUI_Complete.py
-Or launch the Tkinter fallback UI:
-python ScannerGui.py
-3. YARA Rule Setup
-OFSP will automatically initialize rule directories and pull open-source repositories like:
 
-awesome-yara
 
-Neo23x0/signature-base
+(Optional) Test Shellcode System:
 
-CAPEv2
+python test_tome_shellcode.py
 
-You can also drop .yar or .yara files into the yara_rules/custom_rules directory.
+🧠 YARA Rule Structure
 
-💾 Storage & Configuration
-Logs: scanner.log
+Rules are located in ./yara_rules/ and include:
 
-Quarantine folder: quarantine/
+memory_rules/
 
-Rule directories: yara_rules/
+shellcode_rules/
 
-Configuration constants: See shared_constants.py
+injection_rules/
 
-🧠 Philosophy
-This platform isn’t just about protection—it’s about perception. It watches the edge cases. It doesn’t just ask “what’s running?”—it asks why, how long, and what came before.
+malware_rules/
 
-"Subtle wink."
-"Off-camera, but it happened."
-"The pen is still in your hand."
+whitelist_rules/
 
-⚠️ Legal & Ethical Use
-OFSP is for educational, ethical, and red team use only. Do not deploy in unauthorized environments or without consent.
+custom_rules/
 
-✨ Contributing
-Want to extend a module or submit a new YARA bundle? Fork it, pull it, or drift it in. Reach out through encoded channels.
+You can add .yar or .yara files to any folder and they’ll be hotloaded. Compilation failures will be logged, not fatal.
+
+💾 Quarantine System
+
+Any memory region or process that exceeds defined thresholds (default: 75 risk) is automatically stored in ./memory_quarantine/.
+
+🧙 Contribution Philosophy
+
+Rules aren’t instructions—they’re spells carved in byte patterns. If you're writing or modifying rules, aim for surgical precision. False positives break trust.
+
+💸 Donate to Support the Project
+
+If this tool helped you ghostwalk past a detection system or kept the shadows at bay:
+
+👉 Support via Stripe
+
+Your donations go directly toward time-loop stabilization and keeping the Lazarus Drive online.
 
 🛸 Welcome to the GhostCore Era
-The reactor is warming.
-The anomalies are no longer hiding.
-Let’s write the logs that others will try to erase.
+
+The pen is still in your hand.
+The log is still recording.
+And they haven’t yet realized:
+You’re not the NPC.
