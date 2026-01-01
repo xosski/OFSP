@@ -47,6 +47,12 @@ try:
     import ShellCodeMagic
 except ImportError:
     ShellCodeMagic = None
+
+try:
+    import HadesAI
+except ImportError:
+    HadesAI = None
+
 def is_admin():
     """Check if running with administrator privileges"""
     try:
@@ -565,6 +571,19 @@ class OrbitalStationUI(QMainWindow):
         self.quarantine_dir = Path("quarantine")
         self.quarantine_dir.mkdir(exist_ok=True)
         
+        # Initialize HadesAI components
+        self.hades_kb = None
+        self.hades_chat = None
+        self.hades_network_monitor = None
+        self.hades_cache_scanner = None
+        if HadesAI:
+            try:
+                self.hades_kb = HadesAI.KnowledgeBase()
+                self.hades_chat = HadesAI.ChatProcessor(self.hades_kb)
+                print("HadesAI components initialized")
+            except Exception as e:
+                print(f"HadesAI initialization error: {e}")
+        
         # Critical processes that should not be terminated
         self.critical_processes = {
             'explorer.exe', 'svchost.exe', 'lsass.exe', 
@@ -709,7 +728,295 @@ class OrbitalStationUI(QMainWindow):
         self._create_yara_tab()
         self._create_quarantine_tab()
         self._create_logs_tab()
+        self._create_hades_ai_tab()
         self._create_donation_tab()
+    
+    def _create_hades_ai_tab(self):
+        """Create HadesAI integration tab for AI-powered threat analysis"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        
+        # Header
+        header_frame = QGroupBox("🔥 HadesAI - Self-Learning Threat Intelligence")
+        header_frame.setStyleSheet("""
+            QGroupBox {
+                font-size: 16px;
+                font-weight: bold;
+                color: #ff6600;
+                border: 2px solid #ff6600;
+                border-radius: 8px;
+                margin-top: 10px;
+                padding-top: 10px;
+            }
+        """)
+        header_layout = QHBoxLayout(header_frame)
+        
+        # Status indicators
+        self.hades_status_label = QLabel("Status: " + ("🟢 Active" if HadesAI else "🔴 Not Available"))
+        self.hades_status_label.setStyleSheet("color: #00ff88; font-size: 14px;")
+        header_layout.addWidget(self.hades_status_label)
+        
+        self.hades_patterns_label = QLabel("Patterns: 0")
+        header_layout.addWidget(self.hades_patterns_label)
+        
+        self.hades_exploits_label = QLabel("Learned Exploits: 0")
+        header_layout.addWidget(self.hades_exploits_label)
+        
+        header_layout.addStretch()
+        
+        # Refresh stats button
+        refresh_btn = QPushButton("🔄 Refresh Stats")
+        refresh_btn.clicked.connect(self._refresh_hades_stats)
+        header_layout.addWidget(refresh_btn)
+        
+        layout.addWidget(header_frame)
+        
+        # Main content splitter
+        splitter = QSplitter(Qt.Horizontal)
+        
+        # Left side - Chat interface
+        chat_widget = QWidget()
+        chat_layout = QVBoxLayout(chat_widget)
+        
+        chat_label = QLabel("💬 AI Chat - Ask HADES anything about security")
+        chat_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #ff6600;")
+        chat_layout.addWidget(chat_label)
+        
+        self.hades_chat_output = QTextEdit()
+        self.hades_chat_output.setReadOnly(True)
+        self.hades_chat_output.setPlaceholderText("Chat with HADES AI...\n\nTry:\n• 'help' - Show commands\n• 'scan https://example.com' - Scan a target\n• 'show findings' - View threat findings\n• 'scan browser cache' - Scan cached files")
+        self.hades_chat_output.setStyleSheet("background-color: #0d0d0d; color: #00ff88; font-family: Consolas;")
+        chat_layout.addWidget(self.hades_chat_output)
+        
+        # Chat input
+        input_layout = QHBoxLayout()
+        self.hades_chat_input = QLineEdit()
+        self.hades_chat_input.setPlaceholderText("Type a command or question...")
+        self.hades_chat_input.returnPressed.connect(self._send_hades_chat)
+        self.hades_chat_input.setStyleSheet("padding: 8px; font-size: 14px;")
+        input_layout.addWidget(self.hades_chat_input)
+        
+        send_btn = QPushButton("Send")
+        send_btn.clicked.connect(self._send_hades_chat)
+        send_btn.setStyleSheet("background-color: #ff6600; color: white; font-weight: bold; padding: 8px 20px;")
+        input_layout.addWidget(send_btn)
+        
+        chat_layout.addLayout(input_layout)
+        
+        splitter.addWidget(chat_widget)
+        
+        # Right side - Actions and findings
+        actions_widget = QWidget()
+        actions_layout = QVBoxLayout(actions_widget)
+        
+        # Quick actions
+        actions_frame = QGroupBox("⚡ Quick Actions")
+        actions_grid = QGridLayout(actions_frame)
+        
+        cache_scan_btn = QPushButton("🔍 Scan Browser Cache")
+        cache_scan_btn.clicked.connect(self._hades_scan_cache)
+        actions_grid.addWidget(cache_scan_btn, 0, 0)
+        
+        network_mon_btn = QPushButton("🌐 Start Network Monitor")
+        network_mon_btn.clicked.connect(self._hades_start_network_monitor)
+        actions_grid.addWidget(network_mon_btn, 0, 1)
+        
+        show_exploits_btn = QPushButton("📚 Show Learned Exploits")
+        show_exploits_btn.clicked.connect(self._hades_show_exploits)
+        actions_grid.addWidget(show_exploits_btn, 1, 0)
+        
+        show_findings_btn = QPushButton("🎯 Show Threat Findings")
+        show_findings_btn.clicked.connect(self._hades_show_findings)
+        actions_grid.addWidget(show_findings_btn, 1, 1)
+        
+        actions_layout.addWidget(actions_frame)
+        
+        # Recent findings table
+        findings_label = QLabel("📋 Recent Threat Findings")
+        findings_label.setStyleSheet("font-size: 14px; font-weight: bold;")
+        actions_layout.addWidget(findings_label)
+        
+        self.hades_findings_table = QTableWidget()
+        self.hades_findings_table.setColumnCount(5)
+        self.hades_findings_table.setHorizontalHeaderLabels(["Type", "Path", "Severity", "Browser", "Detected"])
+        self.hades_findings_table.horizontalHeader().setStretchLastSection(True)
+        self.hades_findings_table.setAlternatingRowColors(True)
+        actions_layout.addWidget(self.hades_findings_table)
+        
+        splitter.addWidget(actions_widget)
+        splitter.setSizes([500, 400])
+        
+        layout.addWidget(splitter)
+        
+        self.tabs.addTab(widget, "🔥 HadesAI")
+        
+        # Initial stats refresh
+        if HadesAI:
+            QTimer.singleShot(1000, self._refresh_hades_stats)
+    
+    def _send_hades_chat(self):
+        """Send a message to HadesAI chat"""
+        message = self.hades_chat_input.text().strip()
+        if not message:
+            return
+            
+        self.hades_chat_input.clear()
+        self.hades_chat_output.append(f"<b style='color: #00ffcc;'>You:</b> {message}")
+        
+        if not self.hades_chat:
+            self.hades_chat_output.append("<b style='color: #ff4444;'>HADES:</b> I'm not available. Please check if HadesAI module is properly installed.")
+            return
+        
+        try:
+            result = self.hades_chat.process(message)
+            response = result.get('response', 'No response')
+            self.hades_chat_output.append(f"<b style='color: #ff6600;'>HADES:</b> {response}")
+            
+            # Handle any actions
+            action = result.get('action')
+            if action:
+                self._handle_hades_action(action)
+                
+        except Exception as e:
+            self.hades_chat_output.append(f"<b style='color: #ff4444;'>Error:</b> {str(e)}")
+    
+    def _handle_hades_action(self, action):
+        """Handle HadesAI action commands"""
+        action_type = action.get('type')
+        target = action.get('target')
+        
+        if action_type == 'cache_scan':
+            self._hades_scan_cache()
+        elif action_type in ['full_scan', 'vuln_scan', 'port_scan']:
+            self.hades_chat_output.append(f"<i style='color: #888;'>Starting {action_type} on {target}...</i>")
+            # Future: implement actual scanning
+    
+    def _hades_scan_cache(self):
+        """Start browser cache scan"""
+        if not HadesAI:
+            QMessageBox.warning(self, "Error", "HadesAI module not available")
+            return
+            
+        self.hades_chat_output.append("<i style='color: #888;'>Starting browser cache scan...</i>")
+        
+        try:
+            self.hades_cache_scanner = HadesAI.BrowserScanner(self.hades_kb)
+            self.hades_cache_scanner.progress.connect(lambda p: self._hades_cache_progress(p, "Scanning..."))
+            self.hades_cache_scanner.status.connect(lambda s: self.hades_chat_output.append(f"<i style='color: #888;'>{s}</i>"))
+            self.hades_cache_scanner.finding_detected.connect(self._hades_finding_detected)
+            self.hades_cache_scanner.finished_scan.connect(self._hades_cache_complete)
+            self.hades_cache_scanner.start()
+        except Exception as e:
+            self.hades_chat_output.append(f"<b style='color: #ff4444;'>Error:</b> {str(e)}")
+    
+    def _hades_cache_progress(self, progress, message):
+        """Update cache scan progress"""
+        self.hades_chat_output.append(f"<i style='color: #888;'>[{progress}%] {message}</i>")
+    
+    def _hades_finding_detected(self, finding):
+        """Handle a detected finding from HadesAI"""
+        # Add to findings table
+        row = self.hades_findings_table.rowCount()
+        self.hades_findings_table.insertRow(row)
+        
+        items = [
+            QTableWidgetItem(finding.get('type', 'Unknown')),
+            QTableWidgetItem(finding.get('path', '')[:50]),
+            QTableWidgetItem(finding.get('severity', 'Medium')),
+            QTableWidgetItem(finding.get('browser', 'Unknown')),
+            QTableWidgetItem(datetime.now().strftime("%H:%M:%S"))
+        ]
+        
+        for col, item in enumerate(items):
+            severity = finding.get('severity', 'Medium').upper()
+            if severity == 'HIGH':
+                item.setBackground(QColor('#ff4444'))
+            elif severity == 'MEDIUM':
+                item.setBackground(QColor('#ffaa44'))
+            self.hades_findings_table.setItem(row, col, item)
+        
+        # Also add to main OFSP detections
+        detection = {
+            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'type': f"HadesAI: {finding.get('type', 'Unknown')}",
+            'name': finding.get('path', 'Unknown')[:30],
+            'pid': 'N/A',
+            'severity': finding.get('severity', 'Medium'),
+            'description': finding.get('code', '')[:100]
+        }
+        self._add_detection(detection)
+        
+        self.hades_chat_output.append(f"<b style='color: #ff6600;'>🎯 Finding:</b> {finding.get('type')} in {finding.get('path', '')[:40]}")
+    
+    def _hades_cache_complete(self, stats):
+        """Handle cache scan completion"""
+        self.hades_chat_output.append(f"<b style='color: #00ff88;'>✅ Cache scan complete!</b>")
+        self.hades_chat_output.append(f"Files scanned: {stats.get('total_files', 0)}")
+        self.hades_chat_output.append(f"Threats found: {stats.get('threats', 0)}")
+        self._refresh_hades_stats()
+    
+    def _hades_start_network_monitor(self):
+        """Start network monitoring"""
+        if not HadesAI:
+            QMessageBox.warning(self, "Error", "HadesAI module not available")
+            return
+        
+        try:
+            if self.hades_network_monitor and self.hades_network_monitor.isRunning():
+                self.hades_network_monitor.stop()
+                self.hades_chat_output.append("<b style='color: #ffaa00;'>Network monitor stopped</b>")
+            else:
+                self.hades_network_monitor = HadesAI.NetworkMonitor()
+                self.hades_network_monitor.connection_detected.connect(
+                    lambda c: self.hades_chat_output.append(f"<i style='color: #888;'>Connection: {c.get('remote_ip', 'Unknown')}:{c.get('remote_port', 0)}</i>")
+                )
+                self.hades_network_monitor.threat_detected.connect(self._hades_finding_detected)
+                self.hades_network_monitor.start()
+                self.hades_chat_output.append("<b style='color: #00ff88;'>🌐 Network monitor started</b>")
+        except Exception as e:
+            self.hades_chat_output.append(f"<b style='color: #ff4444;'>Error:</b> {str(e)}")
+    
+    def _hades_show_exploits(self):
+        """Show learned exploits"""
+        if not self.hades_kb:
+            self.hades_chat_output.append("<b style='color: #ff4444;'>Knowledge base not available</b>")
+            return
+        
+        exploits = self.hades_kb.get_learned_exploits(10)
+        if exploits:
+            self.hades_chat_output.append("<b style='color: #ff6600;'>📚 Learned Exploits:</b>")
+            for exp in exploits:
+                self.hades_chat_output.append(f"• {exp.get('exploit_type', 'Unknown')} - {exp.get('description', 'No description')[:50]}")
+        else:
+            self.hades_chat_output.append("<i>No exploits learned yet. Scan some targets to learn!</i>")
+    
+    def _hades_show_findings(self):
+        """Show threat findings"""
+        if not self.hades_kb:
+            self.hades_chat_output.append("<b style='color: #ff4444;'>Knowledge base not available</b>")
+            return
+        
+        findings = self.hades_kb.get_threat_findings(10)
+        if findings:
+            self.hades_chat_output.append("<b style='color: #ff6600;'>🎯 Recent Threat Findings:</b>")
+            for f in findings:
+                self.hades_chat_output.append(f"• [{f.get('severity', 'Medium')}] {f.get('threat_type', 'Unknown')} - {f.get('path', '')[:40]}")
+        else:
+            self.hades_chat_output.append("<i>No findings yet. Start a scan!</i>")
+    
+    def _refresh_hades_stats(self):
+        """Refresh HadesAI statistics"""
+        if not self.hades_kb:
+            return
+        
+        try:
+            patterns = self.hades_kb.get_patterns()
+            exploits = self.hades_kb.get_learned_exploits(1000)
+            
+            self.hades_patterns_label.setText(f"Patterns: {len(patterns)}")
+            self.hades_exploits_label.setText(f"Learned Exploits: {len(exploits)}")
+        except Exception as e:
+            print(f"Error refreshing HADES stats: {e}")
         
     def _create_donation_tab(self):
         """Create donation/support tab"""
