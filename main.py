@@ -119,12 +119,6 @@ def main():
                     except ImportError:
                         status_text += "✗ ShellCode Magic\n"
                     
-                    try:
-                        import WraithEngine
-                        status_text += "✓ Wraith Engine\n"
-                    except ImportError:
-                        status_text += "✗ Wraith Engine\n"
-                    
                     label.config(text=status_text)
                     
                     logger.info("Starting basic tkinter event loop")

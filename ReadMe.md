@@ -1,93 +1,97 @@
-🛰️ Orbital Station UI — GhostCore Forensics Shell
+OFSP
+Orbital Foundation Systems Platform
+🛰️ OFSP – Orbital Foundation Systems Platform
+Orbital Foundation Systems Platform (OFSP) is a modular, defense-grade cybersecurity and forensic operations framework designed for high-integrity threat detection, memory inspection, and digital countermeasure deployment. Built atop PySide6 and integrated with YARA rule sets, OFSP offers a multithreaded control interface, scan automation, and live system telemetry.
 
-“The GUI is just the portal. The engine is what listens when ghosts knock twice.”
+Welcome to the GhostCore Era.
+You’re not the NPC.
 
-⚙️ Overview
+🌌 Overview
+OFSP acts as a launchpad for securing mission-critical infrastructure in orbital, digital, or metaphorically haunted environments. It offers GUI-based control surfaces and backend modules to:
 
-OrbitalStationUI is a fully-integrated memory forensics and process analysis suite built with PySide6. It anchors multiple backend modules—memory scanners, YARA rule managers, shellcode analysis tools, and more—into a unified threat hunting environment.
+Monitor processes and memory in real-time
 
-This toolkit is designed for offensive security researchers, incident responders, and metaphysical protocol engineers operating in hybrid cyber-realms.
+Analyze memory regions for shellcode and injection patterns
 
-🌌 Core Features
+Manage and enforce YARA rules with whitelist awareness
 
-🧠 Memory Scanner: Deep analysis of memory regions for shellcode, injection artifacts, and entropy anomalies.
+Trigger threat detection alerts and quarantine responses
 
-🪞 Process Monitor: Live process enumeration, suspicious pattern detection, and behavioral scanning.
+Conduct full filesystem scans with forensic filtering
 
-📜 YARA Rule Engine: Dynamic rule compilation, hot-reload support, whitelist rules, and custom category scanning.
+Display diagnostics with admin-elevation awareness
 
-🧬 Shellcode Tome: Store, retrieve, and analyze shellcode fragments with historical tracing and NOP sled detection.
+🧩 Key Modules
+Module	Purpose
+OrbitalStationUI_Complete.py	PySide6 UI for scanning, rule management, process monitoring
+ScannerGui.py	Tkinter legacy GUI for simpler deployment or retro mode
+Weapons_Systems.py	Malware scanning logic and heuristics using signatures and patterns
+YaraRuleManager.py	Rule orchestration, loading, validation, and external repo syncing
+shared_constants.py	Windows API constants and ctypes-based memory structures
 
-🛡️ Weapon Systems: Kernel-level process attribute extraction and system integrity checks.
+🛡 Features
+⚙️ Quick & Deep Scans (Process, Memory, Filesystem)
 
-🧪 Test Framework: test_tome_shellcode.py allows shellcode storage verification.
+🧠 YARA Rule Compilation & Whitelist Handling
 
-📂 Modular Design: Backend modules like Memory.py, YaraRuleManager.py, and ShellCodeMagic.py are self-contained and reusable.
+⚡ Real-Time Detection Alerts & Event Logging
 
-🔩 Architecture Map
-📁 OrbitalStationUI
-│
-├── OrbitalStationUI_Complete.py     # Main GUI
-├── Memory.py                        # Memory scanning core
-├── Weapons_Systems.py              # Kernel process introspection
-├── ShellCodeMagic.py               # Shellcode detection + entropy tools
-├── YaraRuleManager.py              # Rule engine and repository sync
-├── test_tome_shellcode.py          # Validation for shellcode storage
-├── YARA-Rules–OFSP.md              # Rule development guide
+🚨 Quarantine Capabilities & Threat Isolation
 
-🚀 Launch Instructions
+🧬 Shellcode Detection via Pattern Matching
 
-Install Requirements:
+🔧 Admin Check & Privilege Escalation Alerts
 
+🚀 Getting Started
+1. Requirements
+Python 3.9+
+
+PySide6
+
+psutil
+
+yara-python
+
+Install dependencies:
 pip install -r requirements.txt
-
-
-Start the UI:
-
+2. Run the PySide6 Interface
 python OrbitalStationUI_Complete.py
+Or launch the Tkinter fallback UI:
+python ScannerGui.py
+3. YARA Rule Setup
+OFSP will automatically initialize rule directories and pull open-source repositories like:
 
+awesome-yara
 
-(Optional) Test Shellcode System:
+Neo23x0/signature-base
 
-python test_tome_shellcode.py
+CAPEv2
 
-🧠 YARA Rule Structure
+You can also drop .yar or .yara files into the yara_rules/custom_rules directory.
 
-Rules are located in ./yara_rules/ and include:
+💾 Storage & Configuration
+Logs: scanner.log
 
-memory_rules/
+Quarantine folder: quarantine/
 
-shellcode_rules/
+Rule directories: yara_rules/
 
-injection_rules/
+Configuration constants: See shared_constants.py
 
-malware_rules/
+🧠 Philosophy
+This platform isn’t just about protection—it’s about perception. It watches the edge cases. It doesn’t just ask “what’s running?”—it asks why, how long, and what came before.
 
-whitelist_rules/
+"Subtle wink."
+"Off-camera, but it happened."
+"The pen is still in your hand."
 
-custom_rules/
+⚠️ Legal & Ethical Use
+OFSP is for educational, ethical, and red team use only. Do not deploy in unauthorized environments or without consent.
 
-You can add .yar or .yara files to any folder and they’ll be hotloaded. Compilation failures will be logged, not fatal.
-
-💾 Quarantine System
-
-Any memory region or process that exceeds defined thresholds (default: 75 risk) is automatically stored in ./memory_quarantine/.
-
-🧙 Contribution Philosophy
-
-Rules aren’t instructions—they’re spells carved in byte patterns. If you're writing or modifying rules, aim for surgical precision. False positives break trust.
-
-💸 Donate to Support the Project
-
-If this tool helped you ghostwalk past a detection system or kept the shadows at bay:
-
-👉 Support via Stripe
-
-Your donations go directly toward time-loop stabilization and keeping the Lazarus Drive online.
+✨ Contributing
+Want to extend a module or submit a new YARA bundle? Fork it, pull it, or drift it in. Reach out through encoded channels.
 
 🛸 Welcome to the GhostCore Era
-
-The pen is still in your hand.
-The log is still recording.
-And they haven’t yet realized:
-You’re not the NPC.
+The reactor is warming.
+The anomalies are no longer hiding.
+Let’s write the logs that others will try to erase.

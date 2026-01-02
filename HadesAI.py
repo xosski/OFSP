@@ -25,49 +25,26 @@ import socket
 import urllib.parse
 import concurrent.futures
 import urllib3
+import ast
+import sys
+import traceback
+from io import StringIO
 from urllib.parse import urljoin
+import tk
+from tkinter import ttk
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# Try PySide6 first (for OFSP integration), fall back to PyQt6
-try:
-    from PySide6.QtWidgets import (
-        QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-        QPushButton, QTextEdit, QLabel, QProgressBar, QTabWidget,
-        QTreeWidget, QTreeWidgetItem, QComboBox, QLineEdit, QPlainTextEdit,
-        QGroupBox, QFormLayout, QSpinBox, QCheckBox,
-        QSplitter, QStatusBar, QMenuBar, QMenu, QFileDialog,
-        QMessageBox, QListWidget, QListWidgetItem, QTableWidget,
-        QTableWidgetItem, QHeaderView, QScrollArea
-    )
-    from PySide6.QtCore import Qt, QThread, Signal as pyqtSignal, QTimer
-    from PySide6.QtGui import QFont, QColor, QTextCharFormat, QSyntaxHighlighter, QTextCursor
-    HAS_QT = True
-    QT_BACKEND = "PySide6"
-except ImportError:
-    try:
-        from PyQt6.QtWidgets import (
-            QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-            QPushButton, QTextEdit, QLabel, QProgressBar, QTabWidget,
-            QTreeWidget, QTreeWidgetItem, QComboBox, QLineEdit, QPlainTextEdit,
-            QGroupBox, QFormLayout, QSpinBox, QCheckBox,
-            QSplitter, QStatusBar, QMenuBar, QMenu, QFileDialog,
-            QMessageBox, QListWidget, QListWidgetItem, QTableWidget,
-            QTableWidgetItem, QHeaderView, QScrollArea
-        )
-        from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
-        from PyQt6.QtGui import QFont, QColor, QTextCharFormat, QSyntaxHighlighter, QTextCursor
-        HAS_QT = True
-        QT_BACKEND = "PyQt6"
-    except ImportError:
-        HAS_QT = False
-        QT_BACKEND = None
-        # Create dummy classes so imports don't fail
-        class QThread:
-            pass
-        class QSyntaxHighlighter:
-            pass
-        def pyqtSignal(*args):
-            return None
+from PyQt6.QtWidgets import (
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QPushButton, QTextEdit, QLabel, QProgressBar, QTabWidget,
+    QTreeWidget, QTreeWidgetItem, QComboBox, QLineEdit, QPlainTextEdit,
+    QGroupBox, QFormLayout, QSpinBox, QCheckBox,
+    QSplitter, QStatusBar, QMenuBar, QMenu, QFileDialog,
+    QMessageBox, QListWidget, QListWidgetItem, QTableWidget,
+    QTableWidgetItem, QHeaderView, QScrollArea
+)
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
+from PyQt6.QtGui import QFont, QColor, QTextCharFormat, QSyntaxHighlighter, QTextCursor
 
 try:
     import requests
@@ -1743,7 +1720,11 @@ class HadesAI:
         self.request_injector = RequestInjector(self.proxy_manager)
         self.auth_bypass = AuthBypass(self.proxy_manager)
         self.current_state = {}
-        
+        self.mode = 'chat'  # Modes: chat, code, explain
+        self.personality = "Doomcore Hyperlogic"
+        self.modules = {}
+        self.last_code = ""
+        self.code_assistant = CodeEditorAssistant()
     def chat(self, message: str) -> Dict:
         return self.chat_processor.process(message)
         
@@ -1757,7 +1738,85 @@ class HadesAI:
             cursor.execute(f'SELECT COUNT(*) FROM {table}')
             stats[table] = cursor.fetchone()[0]
         return stats
-    
+    def dispatch(self, user_input):
+        user_input = user_input.strip()
+
+
+        if user_input.startswith("::mode"):
+            _, new_mode = user_input.split(" ", 1)
+            self.mode = new_mode.strip()
+            return f"🔁 Mode switched to: {self.mode}"
+
+
+        if self.mode == 'code':
+            return self.handle_code_interpreter(user_input)
+
+
+        elif self.mode == 'explain':
+            return self.explain_code(user_input)
+
+
+        elif self.mode == 'assist':
+            return self.code_assistant(user_input)
+
+
+        else:
+            return self.handle_chat(user_input)
+    def handle_chat(self, user_input):
+        return f"[HadesAI] ✒️ Echoing in {self.personality}: {user_input}"
+
+
+    def handle_code_interpreter(self, code_str):
+        try:
+            self.last_code = code_str # Save code for assist mode
+            old_stdout = sys.stdout
+            sys.stdout = mystdout = StringIO()
+            exec(code_str, {}, {})
+            output = mystdout.getvalue()
+            sys.stdout = old_stdout
+            return f"✅ Code executed.\nOutput:\n{output.strip()}"
+        except Exception as e:
+            sys.stdout = old_stdout
+            return f"❌ Execution Error:\n{traceback.format_exc()}"
+    def explain_code(self, code_str):
+        try:
+            tree = ast.parse(code_str)
+            explanations = []
+            for node in tree.body:
+                if isinstance(node, ast.FunctionDef):
+                    args = [arg.arg for arg in node.args.args]
+                    explanations.append(
+                        f"📘 Function `{node.name}` takes args: {args}"
+                    )
+                elif isinstance(node, ast.Import):
+                    modules = [alias.name for alias in node.names]
+                    explanations.append(f"📦 Imports modules: {modules}")
+                elif isinstance(node, ast.ImportFrom):
+                    modules = [alias.name for alias in node.names]
+                    explanations.append(f"📦 From {node.module} import {modules}")
+                elif isinstance(node, ast.Assign):
+                    targets = [ast.unparse(t) for t in node.targets]
+                    explanations.append(f"🔧 Variable(s) assigned: {targets}")
+            return "\n".join(explanations) if explanations else "ℹ️ No recognizable constructs to explain."
+        except Exception as e:
+            return f"❌ Explanation Error:\n{traceback.format_exc()}"
+
+    def code_assistant(self, instruction):
+        if not self.last_code:
+            return "⚠️ No code loaded. Switch to ::mode code and provide code first."
+        try:
+            # Simple instructions, expandable with NLP parsing
+            if "add print" in instruction:
+                modified = self.last_code + "\nprint('Instruction completed.')"
+                return f"🛠️ Modified Code:\n{modified}"
+            elif "wrap in function" in instruction:
+                indented = "\n".join(["    " + line for line in self.last_code.splitlines()])
+                wrapped = f"def assisted_function():\n{indented}"
+                return f"🛠️ Wrapped in function:\n{wrapped}"
+            else:
+                return "🤖 Instruction not understood. Try: 'add print', 'wrap in function'."
+        except Exception as e:
+            return f"❌ Assistant Error:\n{traceback.format_exc()}"
     def full_site_scan(self, url: str, callback=None) -> Dict[str, Any]:
         """
         Comprehensive automated reconnaissance on a target URL.
@@ -2534,7 +2593,60 @@ class HadesAI:
         import re
         match = re.search(r'CWE-(\d+)', cwe_string)
         return match.group(1) if match else '0'
+    def dispatch(self, user_input):
+        user_input = user_input.strip()
 
+        if user_input.startswith("::mode"):
+            _, new_mode = user_input.split(" ", 1)
+            self.mode = new_mode.strip()
+            return f"🔁 Mode switched to: {self.mode}"
+
+        if self.mode == 'code':
+            return self.handle_code_interpreter(user_input)
+
+        elif self.mode == 'explain':
+            return self.explain_code(user_input)
+
+        else:
+            return self.handle_chat(user_input)
+
+    def handle_chat(self, user_input):
+        return f"[HadesAI] ✒️ Echoing in {self.personality}: {user_input}"
+
+    def handle_code_interpreter(self, code_str):
+        try:
+            old_stdout = sys.stdout
+            sys.stdout = mystdout = StringIO()
+            exec(code_str, {}, {})
+            output = mystdout.getvalue()
+            sys.stdout = old_stdout
+            return f"✅ Code executed.\nOutput:\n{output.strip()}"
+        except Exception as e:
+            sys.stdout = old_stdout
+            return f"❌ Execution Error:\n{traceback.format_exc()}"
+
+    def explain_code(self, code_str):
+        try:
+            tree = ast.parse(code_str)
+            explanations = []
+            for node in tree.body:
+                if isinstance(node, ast.FunctionDef):
+                    args = [arg.arg for arg in node.args.args]
+                    explanations.append(
+                        f"📘 Function `{node.name}` takes args: {args}"
+                    )
+                elif isinstance(node, ast.Import):
+                    modules = [alias.name for alias in node.names]
+                    explanations.append(f"📦 Imports modules: {modules}")
+                elif isinstance(node, ast.ImportFrom):
+                    modules = [alias.name for alias in node.names]
+                    explanations.append(f"📦 From {node.module} import {modules}")
+                elif isinstance(node, ast.Assign):
+                    targets = [ast.unparse(t) for t in node.targets]
+                    explanations.append(f"🔧 Variable(s) assigned: {targets}")
+            return "\n".join(explanations) if explanations else "ℹ️ No recognizable constructs to explain."
+        except Exception as e:
+            return f"❌ Explanation Error:\n{traceback.format_exc()}"
 
 # ============================================================================
 # GUI
@@ -2573,7 +2685,9 @@ class HadesGUI(QMainWindow):
         self.tabs.addTab(self._create_learned_tab(), "🧠 Learned Exploits")
         self.tabs.addTab(self._create_cache_tab(), "📂 Cache Scanner")
         self.tabs.addTab(self._create_code_tab(), "💻 Code Analysis")
+        self.tabs.addTab(self._create_code_helper_tab(), "💻 Code Helper")
         self.tabs.addTab(self._create_autorecon_tab(), "🧠 AutoRecon")
+        
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
         self.progress = QProgressBar()
@@ -3498,6 +3612,69 @@ class HadesGUI(QMainWindow):
         layout.addWidget(right)
         
         return widget
+    
+    def _create_code_helper_tab(self) -> QWidget:
+        """Code Helper tab - Apply AI instructions to transform code"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        
+        code_group = QGroupBox("Code Editor")
+        code_layout = QVBoxLayout(code_group)
+        self.code_helper_text = QPlainTextEdit()
+        self.code_helper_text.setPlaceholderText("Paste your code here...")
+        self.code_helper_text.setFont(QFont("Consolas", 10))
+        self.code_helper_text.setMinimumHeight(300)
+        code_layout.addWidget(self.code_helper_text)
+        layout.addWidget(code_group)
+        
+        instruction_group = QGroupBox("Instruction")
+        instruction_layout = QHBoxLayout(instruction_group)
+        self.code_instruction_input = QLineEdit()
+        self.code_instruction_input.setPlaceholderText("Enter instruction (e.g., 'add error handling', 'optimize this loop', 'convert to async')...")
+        instruction_layout.addWidget(self.code_instruction_input)
+        
+        apply_btn = QPushButton("🚀 Apply Instruction")
+        apply_btn.clicked.connect(self._apply_code_instruction)
+        instruction_layout.addWidget(apply_btn)
+        layout.addWidget(instruction_group)
+        
+        result_group = QGroupBox("Result / Output")
+        result_layout = QVBoxLayout(result_group)
+        self.code_helper_result = QPlainTextEdit()
+        self.code_helper_result.setReadOnly(True)
+        self.code_helper_result.setFont(QFont("Consolas", 10))
+        self.code_helper_result.setMinimumHeight(200)
+        result_layout.addWidget(self.code_helper_result)
+        layout.addWidget(result_group)
+        
+        return widget
+    
+    def _apply_code_instruction(self):
+        """Apply the instruction to transform the code"""
+        code = self.code_helper_text.toPlainText().strip()
+        instruction = self.code_instruction_input.text().strip()
+        
+        if not code:
+            self.code_helper_result.setPlainText("⚠️ Please paste some code first.")
+            return
+        if not instruction:
+            self.code_helper_result.setPlainText("⚠️ Please enter an instruction.")
+            return
+        
+        self.code_helper_result.setPlainText("🔄 Processing...")
+        
+        prompt = f"Given this code:\n```\n{code}\n```\n\nApply this instruction: {instruction}\n\nReturn only the modified code without explanation."
+        try:
+            result = self.ai.chat(prompt)
+            response = result.get('response', '')
+            if '```' in response:
+                import re
+                code_blocks = re.findall(r'```(?:\w+)?\n?(.*?)```', response, re.DOTALL)
+                if code_blocks:
+                    response = code_blocks[0].strip()
+            self.code_helper_result.setPlainText(response)
+        except Exception as e:
+            self.code_helper_result.setPlainText(f"❌ Error: {str(e)}")
         
     # ========== Chat Methods ==========
     
@@ -4154,7 +4331,21 @@ class AutoReconScanner(QThread):
             self.log.emit(f"❌ Error: {str(e)}")
 
         self.finished.emit(findings)
+class CodeEditorAssistant:
+    def __init__(self):
+        self.current_code = ""
 
+    def set_code(self, code: str):
+        self.current_code = code
+
+    def apply_instruction(self, instruction: str) -> str:
+        # Very basic NLP parser — replace with GPT call or regex parser later
+        if "wrap in function" in instruction:
+            return f"def wrapped_function():\n" + "\n".join("    " + line for line in self.current_code.splitlines())
+        elif "remove print" in instruction:
+            return "\n".join(line for line in self.current_code.splitlines() if "print" not in line)
+        else:
+            return "# Instruction not recognized.\n" + self.current_code
 def main():
     app = QApplication(sys.argv)
     app.setStyle('Fusion')
@@ -4165,3 +4356,15 @@ def main():
 
 if __name__ == "__main__":
     main()
+    ai = HadesAI()
+    print("HadesAI :: Enter input. Use ::mode chat|code|explain to switch modes.")
+    while True:
+        try:
+            user_input = input(">> ")
+            if user_input.lower() in ["exit", "quit"]:
+                break
+            response = ai.dispatch(user_input)
+            print(response)
+        except KeyboardInterrupt:
+            print("\n[HadesAI] Session terminated.")
+            break
