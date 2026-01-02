@@ -1,0 +1,175 @@
+"""
+WRAITH Engine - Deep Process, Memory, and File Purger
+Author: Quellaran // Specter
+"""
+import os
+import psutil
+import shutil
+import ctypes
+import winreg
+import logging
+import yara
+from pathlib import Path
+from datetime import datetime
+
+logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
+
+class WraithEngine:
+    def __init__(self, mode="aggressive"):
+        self.mode = mode.lower()
+        self.logger = logging.getLogger("WRAITH")
+        self.rules = self.compile_yara_rules()
+
+    def compile_yara_rules(self):
+        try:
+            return yara.compile(source="""
+                rule SuspiciousCode 
+                {
+                    strings:
+                        $mz = "MZ"
+                        $powershell = "powershell"
+                        $cmd = "cmd.exe"
+                        $eval = "eval"
+                    condition:
+                        any of them
+                }
+            """)
+        except Exception as e:
+            self.logger.error(f"Failed to compile YARA rules: {e}")
+            return None
+
+    def resolve_process(self, name=None, pid=None):
+        for proc in psutil.process_iter(['pid', 'name', 'exe', 'cmdline']):
+            try:
+                if pid and proc.pid == pid:
+                    return proc
+                if name and proc.info['name'].lower() == name.lower():
+                    return proc
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+        return None
+
+    def scan_memory(self, pid):
+        self.logger.info(f"Scanning memory for PID: {pid}")
+        try:
+            process_handle = ctypes.windll.kernel32.OpenProcess(0x10 | 0x20 | 0x1000, False, pid)
+            if not process_handle:
+                self.logger.warning("Unable to open process memory.")
+                return
+
+            class MEMORY_BASIC_INFORMATION(ctypes.Structure):
+                _fields_ = [
+                    ("BaseAddress", ctypes.c_void_p),
+                    ("AllocationBase", ctypes.c_void_p),
+                    ("AllocationProtect", ctypes.c_ulong),
+                    ("RegionSize", ctypes.c_size_t),
+                    ("State", ctypes.c_ulong),
+                    ("Protect", ctypes.c_ulong),
+                    ("Type", ctypes.c_ulong),
+                ]
+
+            mbi = MEMORY_BASIC_INFORMATION()
+            address = 0
+            while ctypes.windll.kernel32.VirtualQueryEx(process_handle, ctypes.c_void_p(address), ctypes.byref(mbi), ctypes.sizeof(mbi)):
+                buffer = ctypes.create_string_buffer(mbi.RegionSize)
+                bytesRead = ctypes.c_size_t(0)
+                if ctypes.windll.kernel32.ReadProcessMemory(process_handle, ctypes.c_void_p(address), buffer, mbi.RegionSize, ctypes.byref(bytesRead)):
+                    region_data = buffer.raw[:bytesRead.value]
+                    if b"MZ" in region_data[:2]:
+                        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        self.logger.info(f"[!] Possible PE header at {hex(address)} | Size: {mbi.RegionSize} | Time: {timestamp}")
+                    if self.rules:
+                        matches = self.rules.match(data=region_data)
+                        if matches:
+                            self.logger.warning(f"[YARA HIT] Matches at {hex(address)}: {[rule.rule for rule in matches]}")
+                address += mbi.RegionSize
+        except Exception as e:
+            self.logger.error(f"Memory scan failed: {e}")
+
+    def purge(self, name=None, pid=None):
+        proc = self.resolve_process(name, pid)
+        if not proc:
+            self.logger.warning("Target process not found.")
+            return
+
+        self.logger.info(f"Targeting: {proc.name()} (PID {proc.pid})")
+
+        self.scan_memory(proc.pid)
+
+        try:
+            proc.kill()
+            self.logger.info("Process terminated.")
+        except Exception as e:
+            self.logger.error(f"Failed to kill process: {e}")
+
+        try:
+            exe = proc.exe()
+            if os.path.exists(exe):
+                self.secure_delete(exe)
+        except Exception as e:
+            self.logger.error(f"Error deleting exe: {e}")
+
+        try:
+            for f in proc.open_files():
+                self.secure_delete(f.path)
+        except Exception:
+            pass
+
+        self.clean_registry(proc.name())
+
+        self.logger.info("PURGE COMPLETE.")
+
+    def secure_delete(self, path):
+        try:
+            if os.path.isdir(path):
+                shutil.rmtree(path, ignore_errors=True)
+                self.logger.info(f"Directory removed: {path}")
+            elif os.path.isfile(path):
+                with open(path, 'ba+', buffering=0) as f:
+                    length = f.tell()
+                    for _ in range(3):
+                        f.seek(0)
+                        f.write(os.urandom(length))
+                os.remove(path)
+                self.logger.info(f"File shredded: {path}")
+        except Exception as e:
+            self.logger.warning(f"Secure delete failed for {path}: {e}")
+
+    def clean_registry(self, process_name):
+        keys = [
+            r"Software\Microsoft\Windows\CurrentVersion\Run",
+            r"Software\Microsoft\Windows\CurrentVersion\RunOnce",
+            r"System\CurrentControlSet\Services"
+        ]
+        hives = [winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER]
+        for hive in hives:
+            for key_path in keys:
+                try:
+                    with winreg.OpenKey(hive, key_path, 0, winreg.KEY_ALL_ACCESS) as key:
+                        i = 0
+                        while True:
+                            try:
+                                value = winreg.EnumValue(key, i)
+                                if process_name.lower() in str(value).lower():
+                                    winreg.DeleteValue(key, value[0])
+                                    self.logger.info(f"Registry cleaned: {key_path} -> {value[0]}")
+                                else:
+                                    i += 1
+                            except OSError:
+                                break
+                except Exception:
+                    continue
+
+
+if __name__ == '__main__':
+    import argparse
+
+    parser = argparse.ArgumentParser(description="WRAITH Process Purger")
+    parser.add_argument('--target', help='Process name (e.g., evil.exe)')
+    parser.add_argument('--pid', type=int, help='PID of process')
+    parser.add_argument('--mode', default='aggressive', help='Mode: aggressive | stealth')
+
+    args = parser.parse_args()
+
+    engine = WraithEngine(mode=args.mode)
+    engine.purge(name=args.target, pid=args.pid)
