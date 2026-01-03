@@ -30,9 +30,16 @@ import sys
 import traceback
 from io import StringIO
 from urllib.parse import urljoin
-import tk
-from tkinter import ttk
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+# OpenAI GPT Integration
+try:
+    import openai
+    openai.api_key = os.getenv("OPENAI_API_KEY")
+    HAS_OPENAI = True
+except ImportError:
+    openai = None
+    HAS_OPENAI = False
 
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -1707,6 +1714,205 @@ I'm continuously learning from cache scans and websites you point me to."""
 
 
 # ============================================================================
+# CODE EDITOR ASSISTANT - GPT-Powered Code Analysis
+# ============================================================================
+
+class CodeEditorAssistant:
+    """Enhanced Code Editor Assistant with GPT integration and file operations"""
+    
+    def __init__(self):
+        self.current_code = ""
+        self.files = {}  # filename -> code str
+        self.last_code = ""
+        self.mode = 'chat'  # Modes: chat, code, explain, assist
+        
+    def set_code(self, code: str):
+        self.current_code = code
+        self.last_code = code
+        
+    def load_file(self, filename: str) -> str:
+        """Load a file into memory for editing"""
+        try:
+            with open(filename, 'r', encoding='utf-8') as f:
+                self.files[filename] = f.read()
+                self.current_code = self.files[filename]
+                return f"[📂] Loaded file: {filename} ({len(self.files[filename])} chars)"
+        except Exception as e:
+            return f"[❌] Failed to load {filename}: {e}"
+    
+    def save_file(self, filename: str) -> str:
+        """Save the current code to a file"""
+        if filename not in self.files:
+            return "[⚠️] File not loaded. Use load_file first."
+        try:
+            with open(filename, 'w', encoding='utf-8') as f:
+                f.write(self.files[filename])
+            return f"[💾] File saved: {filename}"
+        except Exception as e:
+            return f"[❌] Save failed: {e}"
+    
+    def analyze_file(self, filename: str) -> str:
+        """Analyze a loaded file and return function info"""
+        if filename not in self.files:
+            return "[⚠️] File not loaded."
+        try:
+            code = self.files[filename]
+            tree = ast.parse(code)
+            result = []
+            for node in tree.body:
+                if isinstance(node, ast.FunctionDef):
+                    func_name = node.name
+                    args = [arg.arg for arg in node.args.args]
+                    docstring = ast.get_docstring(node)
+                    lines = len(node.body)
+                    result.append(f"🔎 Function `{func_name}`: args={args}, lines={lines}, doc={docstring or 'None'}")
+                elif isinstance(node, ast.ClassDef):
+                    class_name = node.name
+                    methods = [n.name for n in node.body if isinstance(n, ast.FunctionDef)]
+                    result.append(f"📦 Class `{class_name}`: methods={methods}")
+            return "\n".join(result) if result else "[ℹ️] No functions or classes found."
+        except Exception as e:
+            return f"[❌] Analysis Error:\n{traceback.format_exc()}"
+    
+    def explain_code(self, code_str: str) -> str:
+        """Explain Python code structure"""
+        try:
+            tree = ast.parse(code_str)
+            explanations = []
+            for node in tree.body:
+                if isinstance(node, ast.FunctionDef):
+                    args = [arg.arg for arg in node.args.args]
+                    explanations.append(f"📘 Function `{node.name}` takes args: {args}")
+                elif isinstance(node, ast.ClassDef):
+                    explanations.append(f"📦 Class `{node.name}` defined")
+                elif isinstance(node, ast.Import):
+                    modules = [alias.name for alias in node.names]
+                    explanations.append(f"📦 Imports modules: {modules}")
+                elif isinstance(node, ast.ImportFrom):
+                    modules = [alias.name for alias in node.names]
+                    explanations.append(f"📦 From {node.module} import {modules}")
+                elif isinstance(node, ast.Assign):
+                    targets = [ast.unparse(t) for t in node.targets]
+                    explanations.append(f"🔧 Variable(s) assigned: {targets}")
+            return "\n".join(explanations) if explanations else "ℹ️ No recognizable constructs to explain."
+        except Exception as e:
+            return f"❌ Explanation Error:\n{traceback.format_exc()}"
+    
+    def gpt_analyze(self, code_snippet: str, instruction: str = "Analyze and improve this code") -> str:
+        """Use GPT to analyze or modify code"""
+        if not HAS_OPENAI or not openai:
+            return "[GPT] OpenAI module not available. Install with: pip install openai"
+        
+        if not openai.api_key:
+            return "[GPT] No API key set. Set OPENAI_API_KEY environment variable."
+        
+        try:
+            response = openai.ChatCompletion.create(
+                model="gpt-3.5-turbo",
+                messages=[
+                    {"role": "system", "content": "You are an expert code assistant. Analyze code, find bugs, suggest improvements, and help with refactoring. Be concise and practical."},
+                    {"role": "user", "content": f"{instruction}:\n\n```python\n{code_snippet}\n```"}
+                ],
+                max_tokens=2000,
+                temperature=0.7
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            return f"[GPT ERROR] {e}"
+    
+    def gpt_modify(self, code_snippet: str, instruction: str) -> str:
+        """Use GPT to modify code based on instruction"""
+        if not HAS_OPENAI or not openai:
+            return self.apply_instruction_local(instruction)
+        
+        if not openai.api_key:
+            return self.apply_instruction_local(instruction)
+        
+        try:
+            response = openai.ChatCompletion.create(
+                model="gpt-3.5-turbo",
+                messages=[
+                    {"role": "system", "content": "You are a code modification assistant. Apply the user's instruction to modify the code. Return ONLY the modified code without explanations."},
+                    {"role": "user", "content": f"Apply this instruction to the code: {instruction}\n\nCode:\n```python\n{code_snippet}\n```\n\nReturn only the modified code."}
+                ],
+                max_tokens=2000,
+                temperature=0.3
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            return self.apply_instruction_local(instruction)
+    
+    def analyze_file_with_gpt(self, filename: str) -> str:
+        """Load a file and send each function to GPT for analysis"""
+        if filename not in self.files:
+            load_result = self.load_file(filename)
+            if "Failed" in load_result:
+                return load_result
+        
+        try:
+            code = self.files[filename]
+            tree = ast.parse(code)
+            results = []
+            
+            for node in tree.body:
+                if isinstance(node, ast.FunctionDef):
+                    func_code = ast.unparse(node)
+                    gpt_result = self.gpt_analyze(func_code, f"Review this function `{node.name}` for bugs, security issues, and improvements")
+                    results.append(f"--- GPT Analysis for `{node.name}` ---\n{gpt_result}")
+            
+            return "\n\n".join(results) if results else "[ℹ️] No functions to analyze."
+        except Exception as e:
+            return f"[❌] GPT Analysis Error:\n{traceback.format_exc()}"
+    
+    def apply_instruction_local(self, instruction: str) -> str:
+        """Apply instruction without GPT (fallback)"""
+        instruction_lower = instruction.lower()
+        
+        if "wrap in function" in instruction_lower:
+            indented = "\n".join("    " + line for line in self.current_code.splitlines())
+            return f"def wrapped_function():\n{indented}"
+        elif "remove print" in instruction_lower:
+            return "\n".join(line for line in self.current_code.splitlines() if "print" not in line.lower())
+        elif "add logging" in instruction_lower:
+            new_code = re.sub(r"def (\w+)\((.*?)\):", r"def \1(\2):\n    print(f'Entering \1')", self.current_code)
+            return new_code
+        elif "add error handling" in instruction_lower or "add try" in instruction_lower:
+            lines = self.current_code.splitlines()
+            indented = "\n".join("    " + line for line in lines)
+            return f"try:\n{indented}\nexcept Exception as e:\n    print(f'Error: {{e}}')"
+        elif "convert to async" in instruction_lower:
+            return self.current_code.replace("def ", "async def ").replace("return ", "return await ")
+        elif "add type hints" in instruction_lower:
+            return self.current_code.replace("def ", "def ").replace("(self)", "(self) -> None")
+        else:
+            return f"# Instruction not recognized locally. Install openai for GPT support.\n{self.current_code}"
+    
+    def apply_instruction(self, instruction: str) -> str:
+        """Apply instruction - uses GPT if available, falls back to local"""
+        if not self.current_code:
+            return "⚠️ No code loaded. Use set_code() first."
+        
+        if HAS_OPENAI and openai and openai.api_key:
+            return self.gpt_modify(self.current_code, instruction)
+        else:
+            return self.apply_instruction_local(instruction)
+    
+    def execute_code(self, code_str: str) -> str:
+        """Execute Python code and return output"""
+        try:
+            self.last_code = code_str
+            old_stdout = sys.stdout
+            sys.stdout = mystdout = StringIO()
+            exec(code_str, {"__builtins__": __builtins__}, {})
+            output = mystdout.getvalue()
+            sys.stdout = old_stdout
+            return f"✅ Code executed.\nOutput:\n{output.strip()}"
+        except Exception as e:
+            sys.stdout = sys.__stdout__
+            return f"❌ Execution Error:\n{traceback.format_exc()}"
+
+
+# ============================================================================
 # MAIN AI CLASS  
 # ============================================================================
 
@@ -1724,6 +1930,7 @@ class HadesAI:
         self.personality = "Doomcore Hyperlogic"
         self.modules = {}
         self.last_code = ""
+        self.files = {} # filename -> code str
         self.code_assistant = CodeEditorAssistant()
     def chat(self, message: str) -> Dict:
         return self.chat_processor.process(message)
@@ -1739,27 +1946,97 @@ class HadesAI:
             stats[table] = cursor.fetchone()[0]
         return stats
     def dispatch(self, user_input):
+        """Dispatch commands - supports file operations, GPT analysis, and mode switching"""
         user_input = user_input.strip()
 
-
+        # Mode switching
         if user_input.startswith("::mode"):
             _, new_mode = user_input.split(" ", 1)
             self.mode = new_mode.strip()
             return f"🔁 Mode switched to: {self.mode}"
 
+        # File operations
+        if user_input.startswith("::load"):
+            filename = user_input.split("::load", 1)[1].strip()
+            return self.code_assistant.load_file(filename)
 
+        if user_input.startswith("::save"):
+            filename = user_input.split("::save", 1)[1].strip()
+            return self.code_assistant.save_file(filename)
+
+        if user_input.startswith("::analyze"):
+            filename = user_input.split("::analyze", 1)[1].strip()
+            return self.code_assistant.analyze_file(filename)
+
+        if user_input.startswith("::edit"):
+            parts = user_input.split(" ", 2)
+            if len(parts) == 3:
+                filename = parts[1]
+                instruction = parts[2]
+                if filename in self.code_assistant.files:
+                    self.code_assistant.set_code(self.code_assistant.files[filename])
+                    result = self.code_assistant.apply_instruction(instruction)
+                    self.code_assistant.files[filename] = result
+                    return f"[🛠️] Applied instruction to {filename}:\n{result[:500]}..."
+                return "[⚠️] File not loaded. Use ::load filename first."
+            return "[⚠️] Usage: ::edit filename instruction"
+
+        # GPT code analysis
+        if user_input.startswith("::gpt"):
+            filename = user_input.split("::gpt", 1)[1].strip()
+            return self.code_assistant.analyze_file_with_gpt(filename)
+
+        if user_input.startswith("::gptfunc"):
+            filename = user_input.split("::gptfunc", 1)[1].strip()
+            return self.code_assistant.analyze_file_with_gpt(filename)
+
+        if user_input.startswith("::explain"):
+            code = user_input.split("::explain", 1)[1].strip()
+            if not code and self.code_assistant.current_code:
+                code = self.code_assistant.current_code
+            return self.code_assistant.explain_code(code)
+
+        if user_input.startswith("::exec"):
+            code = user_input.split("::exec", 1)[1].strip()
+            return self.code_assistant.execute_code(code)
+
+        # Help command
+        if user_input.lower() in ["::help", "help", "?"]:
+            return """🔥 **HADES AI - Code & Chat Commands:**
+
+**Mode Switching:**
+• `::mode chat` - Chat mode (default)
+• `::mode code` - Code execution mode
+• `::mode explain` - Code explanation mode
+• `::mode assist` - Code assistant mode
+
+**File Operations:**
+• `::load filename` - Load a file for editing
+• `::save filename` - Save changes to file
+• `::analyze filename` - Analyze file structure
+• `::edit filename instruction` - Apply instruction to file
+
+**GPT Analysis:**
+• `::gpt filename` - GPT analysis of file functions
+• `::gptfunc filename` - Same as ::gpt
+• `::explain code` - Explain code structure
+• `::exec code` - Execute Python code
+
+**Pentesting:** (in chat mode)
+• `scan https://target.com` - Full reconnaissance
+• `scan ports on IP` - Port scan
+• `vuln scan URL` - Vulnerability scan
+• `learn from URL` - Learn exploits from URL
+• `show stats` - View statistics
+"""
+
+        # Mode-based dispatch
         if self.mode == 'code':
             return self.handle_code_interpreter(user_input)
-
-
         elif self.mode == 'explain':
             return self.explain_code(user_input)
-
-
         elif self.mode == 'assist':
-            return self.code_assistant(user_input)
-
-
+            return self.code_assistant_mode(user_input)
         else:
             return self.handle_chat(user_input)
     def handle_chat(self, user_input):
@@ -1801,22 +2078,35 @@ class HadesAI:
         except Exception as e:
             return f"❌ Explanation Error:\n{traceback.format_exc()}"
 
-    def code_assistant(self, instruction):
+    def code_assistant_mode(self, instruction):
+        """Handle assist mode - uses GPT if available for intelligent code modifications"""
         if not self.last_code:
             return "⚠️ No code loaded. Switch to ::mode code and provide code first."
         try:
-            # Simple instructions, expandable with NLP parsing
-            if "add print" in instruction:
-                modified = self.last_code + "\nprint('Instruction completed.')"
-                return f"🛠️ Modified Code:\n{modified}"
-            elif "wrap in function" in instruction:
-                indented = "\n".join(["    " + line for line in self.last_code.splitlines()])
-                wrapped = f"def assisted_function():\n{indented}"
-                return f"🛠️ Wrapped in function:\n{wrapped}"
-            else:
-                return "🤖 Instruction not understood. Try: 'add print', 'wrap in function'."
+            self.code_assistant.set_code(self.last_code)
+            result = self.code_assistant.apply_instruction(instruction)
+            return f"🛠️ Modified Code:\n{result}"
         except Exception as e:
             return f"❌ Assistant Error:\n{traceback.format_exc()}"
+    
+    def gpt_chat(self, message: str) -> str:
+        """Direct GPT chat for code-related questions"""
+        if not HAS_OPENAI or not openai or not openai.api_key:
+            return "GPT not available. Set OPENAI_API_KEY environment variable."
+        
+        try:
+            response = openai.ChatCompletion.create(
+                model="gpt-3.5-turbo",
+                messages=[
+                    {"role": "system", "content": "You are HADES, an expert security and coding assistant. Help with pentesting, code analysis, and security questions."},
+                    {"role": "user", "content": message}
+                ],
+                max_tokens=2000,
+                temperature=0.7
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            return f"GPT Error: {e}"
     def full_site_scan(self, url: str, callback=None) -> Dict[str, Any]:
         """
         Comprehensive automated reconnaissance on a target URL.
@@ -3614,43 +3904,191 @@ class HadesGUI(QMainWindow):
         return widget
     
     def _create_code_helper_tab(self) -> QWidget:
-        """Code Helper tab - Apply AI instructions to transform code"""
+        """Code Helper tab - Apply AI instructions to transform code using GPT"""
         widget = QWidget()
         layout = QVBoxLayout(widget)
         
-        code_group = QGroupBox("Code Editor")
+        # Info banner
+        info_label = QLabel("🤖 GPT-Powered Code Assistant - Analyze, modify, and improve code with AI")
+        info_label.setStyleSheet("background: #0f3460; padding: 10px; border-radius: 5px; font-size: 12px;")
+        layout.addWidget(info_label)
+        
+        # GPT Status
+        gpt_status = "✅ GPT Available" if HAS_OPENAI else "⚠️ GPT Not Available (pip install openai)"
+        gpt_label = QLabel(gpt_status)
+        gpt_label.setStyleSheet("color: #4CAF50;" if HAS_OPENAI else "color: #ff6b6b;")
+        layout.addWidget(gpt_label)
+        
+        # File loading section
+        file_group = QGroupBox("📂 File Operations")
+        file_layout = QHBoxLayout(file_group)
+        self.file_path_input = QLineEdit()
+        self.file_path_input.setPlaceholderText("Enter file path to load...")
+        file_layout.addWidget(self.file_path_input)
+        
+        load_btn = QPushButton("📂 Load File")
+        load_btn.clicked.connect(self._load_code_file)
+        load_btn.setStyleSheet("background: #0f3460;")
+        file_layout.addWidget(load_btn)
+        
+        browse_btn = QPushButton("📁 Browse")
+        browse_btn.clicked.connect(self._browse_code_file)
+        browse_btn.setStyleSheet("background: #0f3460;")
+        file_layout.addWidget(browse_btn)
+        
+        save_btn = QPushButton("💾 Save")
+        save_btn.clicked.connect(self._save_code_file)
+        save_btn.setStyleSheet("background: #4CAF50;")
+        file_layout.addWidget(save_btn)
+        layout.addWidget(file_group)
+        
+        # Code editor
+        code_group = QGroupBox("💻 Code Editor")
         code_layout = QVBoxLayout(code_group)
         self.code_helper_text = QPlainTextEdit()
-        self.code_helper_text.setPlaceholderText("Paste your code here...")
+        self.code_helper_text.setPlaceholderText("Paste your code here or load a file...")
         self.code_helper_text.setFont(QFont("Consolas", 10))
-        self.code_helper_text.setMinimumHeight(300)
+        self.code_helper_text.setMinimumHeight(250)
+        PythonHighlighter(self.code_helper_text.document())
         code_layout.addWidget(self.code_helper_text)
         layout.addWidget(code_group)
         
-        instruction_group = QGroupBox("Instruction")
+        # Instruction section
+        instruction_group = QGroupBox("🎯 AI Instruction")
         instruction_layout = QHBoxLayout(instruction_group)
         self.code_instruction_input = QLineEdit()
-        self.code_instruction_input.setPlaceholderText("Enter instruction (e.g., 'add error handling', 'optimize this loop', 'convert to async')...")
+        self.code_instruction_input.setPlaceholderText("Enter instruction (e.g., 'add error handling', 'optimize this loop', 'find bugs', 'add docstrings')...")
+        self.code_instruction_input.returnPressed.connect(self._apply_code_instruction)
         instruction_layout.addWidget(self.code_instruction_input)
         
-        apply_btn = QPushButton("🚀 Apply Instruction")
+        apply_btn = QPushButton("🚀 Apply with GPT")
         apply_btn.clicked.connect(self._apply_code_instruction)
         instruction_layout.addWidget(apply_btn)
+        
+        analyze_btn = QPushButton("🔍 Analyze")
+        analyze_btn.clicked.connect(self._gpt_analyze_code)
+        analyze_btn.setStyleSheet("background: #0f3460;")
+        instruction_layout.addWidget(analyze_btn)
+        
+        exec_btn = QPushButton("▶ Execute")
+        exec_btn.clicked.connect(self._execute_code)
+        exec_btn.setStyleSheet("background: #ff6b6b;")
+        instruction_layout.addWidget(exec_btn)
         layout.addWidget(instruction_group)
         
-        result_group = QGroupBox("Result / Output")
+        # Quick actions
+        quick_group = QGroupBox("⚡ Quick Actions")
+        quick_layout = QHBoxLayout(quick_group)
+        quick_actions = [
+            ("Add Error Handling", "add try/except error handling"),
+            ("Add Docstrings", "add docstrings to all functions"),
+            ("Find Bugs", "analyze for potential bugs and issues"),
+            ("Optimize", "optimize this code for performance"),
+            ("Add Logging", "add logging to all functions"),
+            ("Security Check", "check for security vulnerabilities"),
+        ]
+        for label, instruction in quick_actions:
+            btn = QPushButton(label)
+            btn.clicked.connect(lambda checked, i=instruction: self._quick_instruction(i))
+            btn.setStyleSheet("background: #0f3460; font-size: 10px; padding: 5px;")
+            quick_layout.addWidget(btn)
+        layout.addWidget(quick_group)
+        
+        # Result section
+        result_group = QGroupBox("📋 Result / Output")
         result_layout = QVBoxLayout(result_group)
         self.code_helper_result = QPlainTextEdit()
         self.code_helper_result.setReadOnly(True)
         self.code_helper_result.setFont(QFont("Consolas", 10))
         self.code_helper_result.setMinimumHeight(200)
         result_layout.addWidget(self.code_helper_result)
+        
+        # Copy result button
+        copy_btn = QPushButton("📋 Copy Result to Editor")
+        copy_btn.clicked.connect(self._copy_result_to_editor)
+        copy_btn.setStyleSheet("background: #0f3460;")
+        result_layout.addWidget(copy_btn)
         layout.addWidget(result_group)
         
         return widget
     
+    def _load_code_file(self):
+        """Load a file into the code editor"""
+        filepath = self.file_path_input.text().strip()
+        if not filepath:
+            self.code_helper_result.setPlainText("⚠️ Enter a file path first.")
+            return
+        result = self.ai.code_assistant.load_file(filepath)
+        if "Loaded" in result:
+            self.code_helper_text.setPlainText(self.ai.code_assistant.files.get(filepath, ""))
+        self.code_helper_result.setPlainText(result)
+    
+    def _browse_code_file(self):
+        """Open file browser to select a file"""
+        filepath, _ = QFileDialog.getOpenFileName(self, "Open Code File", "", 
+            "Python Files (*.py);;All Files (*.*)")
+        if filepath:
+            self.file_path_input.setText(filepath)
+            self._load_code_file()
+    
+    def _save_code_file(self):
+        """Save the current code to file"""
+        filepath = self.file_path_input.text().strip()
+        if not filepath:
+            filepath, _ = QFileDialog.getSaveFileName(self, "Save Code File", "", 
+                "Python Files (*.py);;All Files (*.*)")
+            if filepath:
+                self.file_path_input.setText(filepath)
+        
+        if filepath:
+            code = self.code_helper_text.toPlainText()
+            self.ai.code_assistant.files[filepath] = code
+            result = self.ai.code_assistant.save_file(filepath)
+            self.code_helper_result.setPlainText(result)
+    
+    def _gpt_analyze_code(self):
+        """Analyze code with GPT"""
+        code = self.code_helper_text.toPlainText().strip()
+        if not code:
+            self.code_helper_result.setPlainText("⚠️ Please enter some code first.")
+            return
+        
+        self.code_helper_result.setPlainText("🔄 Analyzing with GPT...")
+        QApplication.processEvents()
+        
+        result = self.ai.code_assistant.gpt_analyze(code, "Analyze this code for bugs, security issues, performance problems, and suggest improvements")
+        self.code_helper_result.setPlainText(result)
+    
+    def _execute_code(self):
+        """Execute the code in the editor"""
+        code = self.code_helper_text.toPlainText().strip()
+        if not code:
+            self.code_helper_result.setPlainText("⚠️ Please enter some code first.")
+            return
+        
+        result = self.ai.code_assistant.execute_code(code)
+        self.code_helper_result.setPlainText(result)
+    
+    def _quick_instruction(self, instruction: str):
+        """Apply a quick instruction"""
+        self.code_instruction_input.setText(instruction)
+        self._apply_code_instruction()
+    
+    def _copy_result_to_editor(self):
+        """Copy the result back to the code editor"""
+        result = self.code_helper_result.toPlainText()
+        if result and not result.startswith(("⚠️", "❌", "🔄", "[GPT")):
+            # Try to extract code from result if it contains markdown
+            if "```" in result:
+                import re
+                code_blocks = re.findall(r'```(?:python)?\n?(.*?)```', result, re.DOTALL)
+                if code_blocks:
+                    result = code_blocks[0].strip()
+            self.code_helper_text.setPlainText(result)
+            self.code_helper_result.setPlainText("✅ Result copied to editor.")
+    
     def _apply_code_instruction(self):
-        """Apply the instruction to transform the code"""
+        """Apply the instruction to transform the code using GPT"""
         code = self.code_helper_text.toPlainText().strip()
         instruction = self.code_instruction_input.text().strip()
         
@@ -3661,18 +4099,27 @@ class HadesGUI(QMainWindow):
             self.code_helper_result.setPlainText("⚠️ Please enter an instruction.")
             return
         
-        self.code_helper_result.setPlainText("🔄 Processing...")
+        self.code_helper_result.setPlainText("🔄 Processing with GPT...")
+        QApplication.processEvents()
         
-        prompt = f"Given this code:\n```\n{code}\n```\n\nApply this instruction: {instruction}\n\nReturn only the modified code without explanation."
         try:
-            result = self.ai.chat(prompt)
-            response = result.get('response', '')
-            if '```' in response:
-                import re
-                code_blocks = re.findall(r'```(?:\w+)?\n?(.*?)```', response, re.DOTALL)
+            # Use the enhanced code assistant with GPT
+            self.ai.code_assistant.set_code(code)
+            
+            if HAS_OPENAI and openai and openai.api_key:
+                # Use GPT for intelligent code modification
+                result = self.ai.code_assistant.gpt_modify(code, instruction)
+            else:
+                # Fall back to local instruction processing
+                result = self.ai.code_assistant.apply_instruction_local(instruction)
+            
+            # Extract code from markdown if present
+            if '```' in result:
+                code_blocks = re.findall(r'```(?:python)?\n?(.*?)```', result, re.DOTALL)
                 if code_blocks:
-                    response = code_blocks[0].strip()
-            self.code_helper_result.setPlainText(response)
+                    result = code_blocks[0].strip()
+            
+            self.code_helper_result.setPlainText(result)
         except Exception as e:
             self.code_helper_result.setPlainText(f"❌ Error: {str(e)}")
         
@@ -4331,21 +4778,8 @@ class AutoReconScanner(QThread):
             self.log.emit(f"❌ Error: {str(e)}")
 
         self.finished.emit(findings)
-class CodeEditorAssistant:
-    def __init__(self):
-        self.current_code = ""
 
-    def set_code(self, code: str):
-        self.current_code = code
 
-    def apply_instruction(self, instruction: str) -> str:
-        # Very basic NLP parser — replace with GPT call or regex parser later
-        if "wrap in function" in instruction:
-            return f"def wrapped_function():\n" + "\n".join("    " + line for line in self.current_code.splitlines())
-        elif "remove print" in instruction:
-            return "\n".join(line for line in self.current_code.splitlines() if "print" not in line)
-        else:
-            return "# Instruction not recognized.\n" + self.current_code
 def main():
     app = QApplication(sys.argv)
     app.setStyle('Fusion')
