@@ -1,0 +1,80 @@
+import ast
+import sys
+import traceback
+from io import StringIO
+
+class HadesAI:
+    def __init__(self):
+        self.mode = 'chat'  # Modes: chat, code, explain
+        self.personality = "Doomcore Hyperlogic"
+        self.modules = {}
+
+    def dispatch(self, user_input):
+        user_input = user_input.strip()
+
+        if user_input.startswith("::mode"):
+            _, new_mode = user_input.split(" ", 1)
+            self.mode = new_mode.strip()
+            return f"🔁 Mode switched to: {self.mode}"
+
+        if self.mode == 'code':
+            return self.handle_code_interpreter(user_input)
+
+        elif self.mode == 'explain':
+            return self.explain_code(user_input)
+
+        else:
+            return self.handle_chat(user_input)
+
+    def handle_chat(self, user_input):
+        return f"[HadesAI] ✒️ Echoing in {self.personality}: {user_input}"
+
+    def handle_code_interpreter(self, code_str):
+        try:
+            old_stdout = sys.stdout
+            sys.stdout = mystdout = StringIO()
+            exec(code_str, {}, {})
+            output = mystdout.getvalue()
+            sys.stdout = old_stdout
+            return f"✅ Code executed.\nOutput:\n{output.strip()}"
+        except Exception as e:
+            sys.stdout = old_stdout
+            return f"❌ Execution Error:\n{traceback.format_exc()}"
+
+    def explain_code(self, code_str):
+        try:
+            tree = ast.parse(code_str)
+            explanations = []
+            for node in tree.body:
+                if isinstance(node, ast.FunctionDef):
+                    args = [arg.arg for arg in node.args.args]
+                    explanations.append(
+                        f"📘 Function `{node.name}` takes args: {args}"
+                    )
+                elif isinstance(node, ast.Import):
+                    modules = [alias.name for alias in node.names]
+                    explanations.append(f"📦 Imports modules: {modules}")
+                elif isinstance(node, ast.ImportFrom):
+                    modules = [alias.name for alias in node.names]
+                    explanations.append(f"📦 From {node.module} import {modules}")
+                elif isinstance(node, ast.Assign):
+                    targets = [ast.unparse(t) for t in node.targets]
+                    explanations.append(f"🔧 Variable(s) assigned: {targets}")
+            return "\n".join(explanations) if explanations else "ℹ️ No recognizable constructs to explain."
+        except Exception as e:
+            return f"❌ Explanation Error:\n{traceback.format_exc()}"
+
+
+if __name__ == '__main__':
+    ai = HadesAI()
+    print("HadesAI :: Enter input. Use ::mode chat|code|explain to switch modes.")
+    while True:
+        try:
+            user_input = input(">> ")
+            if user_input.lower() in ["exit", "quit"]:
+                break
+            response = ai.dispatch(user_input)
+            print(response)
+        except KeyboardInterrupt:
+            print("\n[HadesAI] Session terminated.")
+            break

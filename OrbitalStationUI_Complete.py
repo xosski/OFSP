@@ -47,6 +47,12 @@ try:
     import ShellCodeMagic
 except ImportError:
     ShellCodeMagic = None
+
+try:
+    import HadesAI
+except ImportError:
+    HadesAI = None
+
 def is_admin():
     """Check if running with administrator privileges"""
     try:
@@ -439,10 +445,7 @@ class OrbitalStationUI(QMainWindow):
         self.setWindowTitle("Orbital Station: Malware Defense Console")
         self.setGeometry(100, 100, 1400, 900)
         
-        # Initialize backend components first
-        self._init_backend()
-        
-        # Initialize GUI variables
+        # Initialize GUI variables first (before backend)
         self.scanning = False
         self.monitoring_active = False
         self.total_processes_scanned = 0
@@ -450,9 +453,27 @@ class OrbitalStationUI(QMainWindow):
         self.detections = []
         self.scan_worker = None
         
-        # Setup styling and create UI
+        # Pre-initialize backend attributes to None
+        self.memory_scanner = None
+        self.yara_manager = None
+        self.rules_loaded = False
+        self.compiled_rules = None
+        self.shellcode_detector = None
+        self.shellcode_tome = None
+        self.code_disassembler = None
+        self.threat_quarantine = None
+        self.malware_scanner = None
+        
+        # Setup styling and create UI FIRST (so user sees something)
         self._setup_styling()
         self._create_ui()
+        
+        # Show the window immediately
+        self.show()
+        QApplication.processEvents()
+        
+        # Now initialize backend components (with progress feedback)
+        self._init_backend()
         
         # Initialize protection systems
         self.initial_protection()
@@ -461,11 +482,21 @@ class OrbitalStationUI(QMainWindow):
         """Initialize all backend components"""
         print("Initializing backend components...")
         
+        # Initialize memory scanner FIRST (before YARA manager tries to use it)
+        self.memory_scanner = None
+        if Memory:
+            try:
+                self.memory_scanner = Memory.MemoryScanner()
+                print("Memory scanner initialized")
+            except Exception as e:
+                print(f"Memory scanner initialization error: {e}")
+                self.memory_scanner = None
+        
         # Initialize YARA manager
         if YaraRuleManager:
             try:
                 # Use shared YARA manager to avoid recompilation
-                if hasattr(self.memory_scanner, 'shared_yara_manager') and self.memory_scanner.shared_yara_manager:
+                if self.memory_scanner and hasattr(self.memory_scanner, 'shared_yara_manager') and self.memory_scanner.shared_yara_manager:
                     self.yara_manager = self.memory_scanner.shared_yara_manager
                 else:
                     self.yara_manager = YaraRuleManager.YaraRuleManager()
@@ -482,20 +513,19 @@ class OrbitalStationUI(QMainWindow):
                 print(f"YARA Manager initialized - Rules loaded: {self.rules_loaded}")
                 
                 # Share this YARA manager with other components to prevent recompilation
-                try:
-                    import Memory
-                    Memory.MemoryScanner.shared_yara_manager = self.yara_manager
-                    print("Shared YaraRuleManager with MemoryScanner")
-                except ImportError:
-                    pass
+                if Memory and hasattr(Memory, 'MemoryScanner'):
+                    try:
+                        Memory.MemoryScanner.shared_yara_manager = self.yara_manager
+                        print("Shared YaraRuleManager with MemoryScanner")
+                    except Exception:
+                        pass
                     
-                try:
-                    import ShellCodeMagic
-                    if hasattr(ShellCodeMagic, 'ShellcodeDetector'):
+                if ShellCodeMagic and hasattr(ShellCodeMagic, 'ShellcodeDetector'):
+                    try:
                         ShellCodeMagic.ShellcodeDetector.shared_yara_manager = self.yara_manager
                         print("Shared YaraRuleManager with ShellcodeDetector")
-                except ImportError:
-                    pass
+                    except Exception:
+                        pass
             except Exception as e:
                 print(f"YARA initialization error: {e}")
                 self.yara_manager = None
@@ -503,17 +533,6 @@ class OrbitalStationUI(QMainWindow):
         else:
             self.yara_manager = None
             self.rules_loaded = False
-            
-        # Initialize memory scanner
-        if Memory:
-            try:
-                self.memory_scanner = Memory.MemoryScanner()
-                print("Memory scanner initialized")
-            except Exception as e:
-                print(f"Memory scanner initialization error: {e}")
-                self.memory_scanner = None
-        else:
-            self.memory_scanner = None
             
         # Initialize shellcode detection components
         if ShellCodeMagic:
@@ -551,6 +570,19 @@ class OrbitalStationUI(QMainWindow):
         # Initialize quarantine directory
         self.quarantine_dir = Path("quarantine")
         self.quarantine_dir.mkdir(exist_ok=True)
+        
+        # Initialize HadesAI components
+        self.hades_kb = None
+        self.hades_chat = None
+        self.hades_network_monitor = None
+        self.hades_cache_scanner = None
+        if HadesAI:
+            try:
+                self.hades_kb = HadesAI.KnowledgeBase()
+                self.hades_chat = HadesAI.ChatProcessor(self.hades_kb)
+                print("HadesAI components initialized")
+            except Exception as e:
+                print(f"HadesAI initialization error: {e}")
         
         # Critical processes that should not be terminated
         self.critical_processes = {
@@ -696,6 +728,384 @@ class OrbitalStationUI(QMainWindow):
         self._create_yara_tab()
         self._create_quarantine_tab()
         self._create_logs_tab()
+        self._create_hades_ai_tab()
+        self._create_donation_tab()
+    
+    def _create_hades_ai_tab(self):
+        """Create HadesAI integration tab for AI-powered threat analysis"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        
+        # Header
+        header_frame = QGroupBox("🔥 HadesAI - Self-Learning Threat Intelligence")
+        header_frame.setStyleSheet("""
+            QGroupBox {
+                font-size: 16px;
+                font-weight: bold;
+                color: #ff6600;
+                border: 2px solid #ff6600;
+                border-radius: 8px;
+                margin-top: 10px;
+                padding-top: 10px;
+            }
+        """)
+        header_layout = QHBoxLayout(header_frame)
+        
+        # Status indicators
+        self.hades_status_label = QLabel("Status: " + ("🟢 Active" if HadesAI else "🔴 Not Available"))
+        self.hades_status_label.setStyleSheet("color: #00ff88; font-size: 14px;")
+        header_layout.addWidget(self.hades_status_label)
+        
+        self.hades_patterns_label = QLabel("Patterns: 0")
+        header_layout.addWidget(self.hades_patterns_label)
+        
+        self.hades_exploits_label = QLabel("Learned Exploits: 0")
+        header_layout.addWidget(self.hades_exploits_label)
+        
+        header_layout.addStretch()
+        
+        # Refresh stats button
+        refresh_btn = QPushButton("🔄 Refresh Stats")
+        refresh_btn.clicked.connect(self._refresh_hades_stats)
+        header_layout.addWidget(refresh_btn)
+        
+        layout.addWidget(header_frame)
+        
+        # Main content splitter
+        splitter = QSplitter(Qt.Horizontal)
+        
+        # Left side - Chat interface
+        chat_widget = QWidget()
+        chat_layout = QVBoxLayout(chat_widget)
+        
+        chat_label = QLabel("💬 AI Chat - Ask HADES anything about security")
+        chat_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #ff6600;")
+        chat_layout.addWidget(chat_label)
+        
+        self.hades_chat_output = QTextEdit()
+        self.hades_chat_output.setReadOnly(True)
+        self.hades_chat_output.setPlaceholderText("Chat with HADES AI...\n\nTry:\n• 'help' - Show commands\n• 'scan https://example.com' - Scan a target\n• 'show findings' - View threat findings\n• 'scan browser cache' - Scan cached files")
+        self.hades_chat_output.setStyleSheet("background-color: #0d0d0d; color: #00ff88; font-family: Consolas;")
+        chat_layout.addWidget(self.hades_chat_output)
+        
+        # Chat input
+        input_layout = QHBoxLayout()
+        self.hades_chat_input = QLineEdit()
+        self.hades_chat_input.setPlaceholderText("Type a command or question...")
+        self.hades_chat_input.returnPressed.connect(self._send_hades_chat)
+        self.hades_chat_input.setStyleSheet("padding: 8px; font-size: 14px;")
+        input_layout.addWidget(self.hades_chat_input)
+        
+        send_btn = QPushButton("Send")
+        send_btn.clicked.connect(self._send_hades_chat)
+        send_btn.setStyleSheet("background-color: #ff6600; color: white; font-weight: bold; padding: 8px 20px;")
+        input_layout.addWidget(send_btn)
+        
+        chat_layout.addLayout(input_layout)
+        
+        splitter.addWidget(chat_widget)
+        
+        # Right side - Actions and findings
+        actions_widget = QWidget()
+        actions_layout = QVBoxLayout(actions_widget)
+        
+        # Quick actions
+        actions_frame = QGroupBox("⚡ Quick Actions")
+        actions_grid = QGridLayout(actions_frame)
+        
+        cache_scan_btn = QPushButton("🔍 Scan Browser Cache")
+        cache_scan_btn.clicked.connect(self._hades_scan_cache)
+        actions_grid.addWidget(cache_scan_btn, 0, 0)
+        
+        network_mon_btn = QPushButton("🌐 Start Network Monitor")
+        network_mon_btn.clicked.connect(self._hades_start_network_monitor)
+        actions_grid.addWidget(network_mon_btn, 0, 1)
+        
+        show_exploits_btn = QPushButton("📚 Show Learned Exploits")
+        show_exploits_btn.clicked.connect(self._hades_show_exploits)
+        actions_grid.addWidget(show_exploits_btn, 1, 0)
+        
+        show_findings_btn = QPushButton("🎯 Show Threat Findings")
+        show_findings_btn.clicked.connect(self._hades_show_findings)
+        actions_grid.addWidget(show_findings_btn, 1, 1)
+        
+        actions_layout.addWidget(actions_frame)
+        
+        # Recent findings table
+        findings_label = QLabel("📋 Recent Threat Findings")
+        findings_label.setStyleSheet("font-size: 14px; font-weight: bold;")
+        actions_layout.addWidget(findings_label)
+        
+        self.hades_findings_table = QTableWidget()
+        self.hades_findings_table.setColumnCount(5)
+        self.hades_findings_table.setHorizontalHeaderLabels(["Type", "Path", "Severity", "Browser", "Detected"])
+        self.hades_findings_table.horizontalHeader().setStretchLastSection(True)
+        self.hades_findings_table.setAlternatingRowColors(True)
+        actions_layout.addWidget(self.hades_findings_table)
+        
+        splitter.addWidget(actions_widget)
+        splitter.setSizes([500, 400])
+        
+        layout.addWidget(splitter)
+        
+        self.tabs.addTab(widget, "🔥 HadesAI")
+        
+        # Initial stats refresh
+        if HadesAI:
+            QTimer.singleShot(1000, self._refresh_hades_stats)
+    
+    def _send_hades_chat(self):
+        """Send a message to HadesAI chat"""
+        message = self.hades_chat_input.text().strip()
+        if not message:
+            return
+            
+        self.hades_chat_input.clear()
+        self.hades_chat_output.append(f"<b style='color: #00ffcc;'>You:</b> {message}")
+        
+        if not self.hades_chat:
+            self.hades_chat_output.append("<b style='color: #ff4444;'>HADES:</b> I'm not available. Please check if HadesAI module is properly installed.")
+            return
+        
+        try:
+            result = self.hades_chat.process(message)
+            response = result.get('response', 'No response')
+            self.hades_chat_output.append(f"<b style='color: #ff6600;'>HADES:</b> {response}")
+            
+            # Handle any actions
+            action = result.get('action')
+            if action:
+                self._handle_hades_action(action)
+                
+        except Exception as e:
+            self.hades_chat_output.append(f"<b style='color: #ff4444;'>Error:</b> {str(e)}")
+    
+    def _handle_hades_action(self, action):
+        """Handle HadesAI action commands"""
+        action_type = action.get('type')
+        target = action.get('target')
+        
+        if action_type == 'cache_scan':
+            self._hades_scan_cache()
+        elif action_type in ['full_scan', 'vuln_scan', 'port_scan']:
+            self.hades_chat_output.append(f"<i style='color: #888;'>Starting {action_type} on {target}...</i>")
+            # Future: implement actual scanning
+    
+    def _hades_scan_cache(self):
+        """Start browser cache scan"""
+        if not HadesAI:
+            QMessageBox.warning(self, "Error", "HadesAI module not available")
+            return
+            
+        self.hades_chat_output.append("<i style='color: #888;'>Starting browser cache scan...</i>")
+        
+        try:
+            self.hades_cache_scanner = HadesAI.BrowserScanner(self.hades_kb)
+            self.hades_cache_scanner.progress.connect(lambda p: self._hades_cache_progress(p, "Scanning..."))
+            self.hades_cache_scanner.status.connect(lambda s: self.hades_chat_output.append(f"<i style='color: #888;'>{s}</i>"))
+            self.hades_cache_scanner.finding_detected.connect(self._hades_finding_detected)
+            self.hades_cache_scanner.finished_scan.connect(self._hades_cache_complete)
+            self.hades_cache_scanner.start()
+        except Exception as e:
+            self.hades_chat_output.append(f"<b style='color: #ff4444;'>Error:</b> {str(e)}")
+    
+    def _hades_cache_progress(self, progress, message):
+        """Update cache scan progress"""
+        self.hades_chat_output.append(f"<i style='color: #888;'>[{progress}%] {message}</i>")
+    
+    def _hades_finding_detected(self, finding):
+        """Handle a detected finding from HadesAI"""
+        # Add to findings table
+        row = self.hades_findings_table.rowCount()
+        self.hades_findings_table.insertRow(row)
+        
+        items = [
+            QTableWidgetItem(finding.get('type', 'Unknown')),
+            QTableWidgetItem(finding.get('path', '')[:50]),
+            QTableWidgetItem(finding.get('severity', 'Medium')),
+            QTableWidgetItem(finding.get('browser', 'Unknown')),
+            QTableWidgetItem(datetime.now().strftime("%H:%M:%S"))
+        ]
+        
+        for col, item in enumerate(items):
+            severity = finding.get('severity', 'Medium').upper()
+            if severity == 'HIGH':
+                item.setBackground(QColor('#ff4444'))
+            elif severity == 'MEDIUM':
+                item.setBackground(QColor('#ffaa44'))
+            self.hades_findings_table.setItem(row, col, item)
+        
+        # Also add to main OFSP detections
+        detection = {
+            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'type': f"HadesAI: {finding.get('type', 'Unknown')}",
+            'name': finding.get('path', 'Unknown')[:30],
+            'pid': 'N/A',
+            'severity': finding.get('severity', 'Medium'),
+            'description': finding.get('code', '')[:100]
+        }
+        self._add_detection(detection)
+        
+        self.hades_chat_output.append(f"<b style='color: #ff6600;'>🎯 Finding:</b> {finding.get('type')} in {finding.get('path', '')[:40]}")
+    
+    def _hades_cache_complete(self, stats):
+        """Handle cache scan completion"""
+        self.hades_chat_output.append(f"<b style='color: #00ff88;'>✅ Cache scan complete!</b>")
+        self.hades_chat_output.append(f"Files scanned: {stats.get('total_files', 0)}")
+        self.hades_chat_output.append(f"Threats found: {stats.get('threats', 0)}")
+        self._refresh_hades_stats()
+    
+    def _hades_start_network_monitor(self):
+        """Start network monitoring"""
+        if not HadesAI:
+            QMessageBox.warning(self, "Error", "HadesAI module not available")
+            return
+        
+        try:
+            if self.hades_network_monitor and self.hades_network_monitor.isRunning():
+                self.hades_network_monitor.stop()
+                self.hades_chat_output.append("<b style='color: #ffaa00;'>Network monitor stopped</b>")
+            else:
+                self.hades_network_monitor = HadesAI.NetworkMonitor()
+                self.hades_network_monitor.connection_detected.connect(
+                    lambda c: self.hades_chat_output.append(f"<i style='color: #888;'>Connection: {c.get('remote_ip', 'Unknown')}:{c.get('remote_port', 0)}</i>")
+                )
+                self.hades_network_monitor.threat_detected.connect(self._hades_finding_detected)
+                self.hades_network_monitor.start()
+                self.hades_chat_output.append("<b style='color: #00ff88;'>🌐 Network monitor started</b>")
+        except Exception as e:
+            self.hades_chat_output.append(f"<b style='color: #ff4444;'>Error:</b> {str(e)}")
+    
+    def _hades_show_exploits(self):
+        """Show learned exploits"""
+        if not self.hades_kb:
+            self.hades_chat_output.append("<b style='color: #ff4444;'>Knowledge base not available</b>")
+            return
+        
+        exploits = self.hades_kb.get_learned_exploits(10)
+        if exploits:
+            self.hades_chat_output.append("<b style='color: #ff6600;'>📚 Learned Exploits:</b>")
+            for exp in exploits:
+                self.hades_chat_output.append(f"• {exp.get('exploit_type', 'Unknown')} - {exp.get('description', 'No description')[:50]}")
+        else:
+            self.hades_chat_output.append("<i>No exploits learned yet. Scan some targets to learn!</i>")
+    
+    def _hades_show_findings(self):
+        """Show threat findings"""
+        if not self.hades_kb:
+            self.hades_chat_output.append("<b style='color: #ff4444;'>Knowledge base not available</b>")
+            return
+        
+        findings = self.hades_kb.get_threat_findings(10)
+        if findings:
+            self.hades_chat_output.append("<b style='color: #ff6600;'>🎯 Recent Threat Findings:</b>")
+            for f in findings:
+                self.hades_chat_output.append(f"• [{f.get('severity', 'Medium')}] {f.get('threat_type', 'Unknown')} - {f.get('path', '')[:40]}")
+        else:
+            self.hades_chat_output.append("<i>No findings yet. Start a scan!</i>")
+    
+    def _refresh_hades_stats(self):
+        """Refresh HadesAI statistics"""
+        if not self.hades_kb:
+            return
+        
+        try:
+            patterns = self.hades_kb.get_patterns()
+            exploits = self.hades_kb.get_learned_exploits(1000)
+            
+            self.hades_patterns_label.setText(f"Patterns: {len(patterns)}")
+            self.hades_exploits_label.setText(f"Learned Exploits: {len(exploits)}")
+        except Exception as e:
+            print(f"Error refreshing HADES stats: {e}")
+        
+    def _create_donation_tab(self):
+        """Create donation/support tab"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setAlignment(Qt.AlignCenter)
+        
+        # Spacer at top
+        layout.addStretch()
+        
+        # Main donation frame
+        donation_frame = QGroupBox("Support Orbital Station Development")
+        donation_frame.setStyleSheet("""
+            QGroupBox {
+                font-size: 18px;
+                font-weight: bold;
+                color: #00ff88;
+                border: 2px solid #00ff88;
+                border-radius: 10px;
+                margin-top: 20px;
+                padding: 20px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 20px;
+                padding: 0 10px;
+            }
+        """)
+        donation_layout = QVBoxLayout(donation_frame)
+        donation_layout.setSpacing(20)
+        
+        # Thank you message
+        thanks_label = QLabel("Thank you for using Orbital Station!")
+        thanks_label.setStyleSheet("font-size: 16px; color: #ffffff; font-weight: bold;")
+        thanks_label.setAlignment(Qt.AlignCenter)
+        donation_layout.addWidget(thanks_label)
+        
+        # Description
+        desc_label = QLabel(
+            "Your support helps us continue developing and improving\n"
+            "Orbital Station's malware detection capabilities.\n\n"
+            "Every contribution makes a difference!"
+        )
+        desc_label.setStyleSheet("font-size: 14px; color: #cccccc;")
+        desc_label.setAlignment(Qt.AlignCenter)
+        donation_layout.addWidget(desc_label)
+        
+        # Donation button
+        donate_btn = QPushButton("💖 Support the Project")
+        donate_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #6772e5;
+                color: white;
+                font-size: 18px;
+                font-weight: bold;
+                padding: 15px 40px;
+                border-radius: 8px;
+                border: none;
+            }
+            QPushButton:hover {
+                background-color: #7b85e8;
+            }
+            QPushButton:pressed {
+                background-color: #5469d4;
+            }
+        """)
+        donate_btn.setCursor(Qt.PointingHandCursor)
+        donate_btn.clicked.connect(self._open_donation_link)
+        donation_layout.addWidget(donate_btn, alignment=Qt.AlignCenter)
+        
+        # Link info
+        link_label = QLabel("Secure payment via Stripe")
+        link_label.setStyleSheet("font-size: 12px; color: #888888;")
+        link_label.setAlignment(Qt.AlignCenter)
+        donation_layout.addWidget(link_label)
+        
+        layout.addWidget(donation_frame)
+        
+        # Spacer at bottom
+        layout.addStretch()
+        
+        self.tabs.addTab(widget, "💖 Support")
+    
+    def _open_donation_link(self):
+        """Open the donation link in the default browser"""
+        import webbrowser
+        webbrowser.open("https://buy.stripe.com/28EbJ1f7ceo3ckyeES5kk00")
+        if hasattr(self, 'log_output'):
+            self.log_output.append("💖 Thank you for considering a donation!")
         
     def _create_status_bar(self, parent_layout):
         """Create status bar with system information"""
@@ -1935,10 +2345,16 @@ class OrbitalStationUI(QMainWindow):
         self._smart_refresh_processes()
         
     def _add_detection(self, detection):
-        """Add a new detection to the table"""
+        """Add a new detection to all relevant tables and logs"""
         self.detections.append(detection)
         self.threats_found += 1
         self.threats_label.setText(f"Threats: {self.threats_found}")
+        
+        # Log the detection
+        if hasattr(self, 'log_output'):
+            severity = detection.get('severity', 'Medium')
+            icon = "🔴" if severity == 'High' else "🟡" if severity == 'Medium' else "🟢"
+            self.log_output.append(f"{icon} Detection: {detection.get('type', 'Unknown')} - {detection.get('name', 'Unknown')} (PID: {detection.get('pid', 'N/A')})")
         
         # Add to detections table
         row = self.detections_table.rowCount()
@@ -1954,14 +2370,26 @@ class OrbitalStationUI(QMainWindow):
         ]
         
         for col, item in enumerate(items):
-            self.detections_table.setItem(row, col, QTableWidgetItem(str(item)))
+            table_item = QTableWidgetItem(str(item))
+            # Color code by severity
+            severity = detection.get('severity', 'Medium')
+            if severity == 'High':
+                table_item.setBackground(QColor('#ff4444'))
+            elif severity == 'Medium':
+                table_item.setBackground(QColor('#ffaa44'))
+            self.detections_table.setItem(row, col, table_item)
+        
+        # Also add to scan results table if available
+        if hasattr(self, 'scan_results_table'):
+            self._add_to_scan_results(detection)
             
         # Also add to live scan tab if available
         if hasattr(self, 'live_detections_table'):
             self._add_live_detection(detection)
             
-        # Add to shellcode detection tab if it's a shellcode detection
-        if 'shellcode' in detection.get('type', '').lower():
+        # Add to shellcode detection tab if it's a shellcode/memory detection
+        detection_type = detection.get('type', '').lower()
+        if 'shellcode' in detection_type or 'memory' in detection_type or 'injection' in detection_type:
             self._add_shellcode_detection(detection)
             
     # === FILE SCANNER METHODS ===
@@ -2016,7 +2444,7 @@ class OrbitalStationUI(QMainWindow):
     # === MEMORY ANALYSIS METHODS ===
     
     def _analyze_memory(self):
-        """Analyze process memory"""
+        """Analyze process memory with enhanced shellcode detection"""
         pid_text = self.pid_input.text().strip()
         if not pid_text:
             QMessageBox.warning(self, "Error", "Please enter a Process ID")
@@ -2029,48 +2457,63 @@ class OrbitalStationUI(QMainWindow):
                 return
                 
             self.memory_output.clear()
-            self.memory_output.append(f"Analyzing memory for PID {pid}...\n")
+            self.memory_output.append(f"🔍 Analyzing memory for PID {pid}...\n")
             
             if self.memory_scanner:
-                # Perform actual memory analysis
-                self.memory_output.append("Memory scanner is available - performing analysis...")
+                self.memory_output.append("Memory scanner is available - performing enhanced analysis...")
                 try:
-                    # Check if process exists
                     import psutil
                     proc = psutil.Process(pid)
-                    self.memory_output.append(f"Process found: {proc.name()} (PID: {pid})")
+                    proc_name = proc.name()
+                    self.memory_output.append(f"Process found: {proc_name} (PID: {pid})")
                     
-                    # Perform basic memory analysis
+                    # Basic memory info
                     memory_info = proc.memory_info()
-                    self.memory_output.append(f"Memory usage: {memory_info.rss // (1024*1024)} MB")
-                    self.memory_output.append(f"Virtual memory: {memory_info.vms // (1024*1024)} MB")
+                    self.memory_output.append(f"📊 Memory usage: {memory_info.rss // (1024*1024)} MB")
+                    self.memory_output.append(f"📊 Virtual memory: {memory_info.vms // (1024*1024)} MB")
                     
-                    # Check for suspicious behavior patterns
                     try:
-                        # Get process executable path
                         exe_path = proc.exe()
-                        self.memory_output.append(f"Executable: {exe_path}")
-                        
-                        # Check process status
-                        status = proc.status()
-                        self.memory_output.append(f"Status: {status}")
-                        
-                        # Get CPU usage
-                        cpu_percent = proc.cpu_percent()
-                        self.memory_output.append(f"CPU usage: {cpu_percent}%")
-                        
-                        # Basic analysis complete
-                        self.memory_output.append("Memory analysis completed.")
-                        
+                        self.memory_output.append(f"📂 Executable: {exe_path}")
+                        self.memory_output.append(f"📊 Status: {proc.status()}")
                     except psutil.AccessDenied:
-                        self.memory_output.append("Access denied to some process information (requires elevated privileges)")
+                        self.memory_output.append("⚠️ Limited access (some info requires admin)")
+                    
+                    # Enhanced memory scan with shellcode detection
+                    self.memory_output.append("\n🔬 Starting enhanced shellcode detection...")
+                    try:
+                        detections = self.memory_scanner.scan_process_memory_enhanced(pid)
+                        
+                        if detections:
+                            self.memory_output.append(f"\n⚠️ Found {len(detections)} suspicious patterns:\n")
+                            for detection in detections:
+                                self.memory_output.append(f"  🎯 {detection.get('type', 'Unknown')}")
+                                self.memory_output.append(f"     Address: 0x{detection.get('address', 0):08x}")
+                                self.memory_output.append(f"     Confidence: {detection.get('confidence', 0)}%")
+                                self.memory_output.append(f"     Risk: {detection.get('risk', 'Unknown')}")
+                                self.memory_output.append(f"     Size: {detection.get('size', 0)} bytes")
+                                self.memory_output.append("")
+                                
+                                # Add to detections system
+                                detection['name'] = proc_name
+                                detection['pid'] = pid
+                                detection['severity'] = detection.get('risk', 'Medium')
+                                detection['description'] = detection.get('details', f"Shellcode detected at 0x{detection.get('address', 0):08x}")
+                                self._add_detection(detection)
+                        else:
+                            self.memory_output.append("\n✅ No suspicious shellcode patterns detected")
+                            
+                    except Exception as scan_error:
+                        self.memory_output.append(f"⚠️ Enhanced scan error: {str(scan_error)}")
+                    
+                    self.memory_output.append("\n✅ Memory analysis completed.")
                     
                 except psutil.NoSuchProcess:
-                    self.memory_output.append(f"Process with PID {pid} not found")
+                    self.memory_output.append(f"❌ Process with PID {pid} not found")
                 except Exception as e:
-                    self.memory_output.append(f"Error during memory analysis: {str(e)}")
+                    self.memory_output.append(f"❌ Error during memory analysis: {str(e)}")
             else:
-                self.memory_output.append("Memory scanner not available")
+                self.memory_output.append("❌ Memory scanner not available")
                 
         except ValueError:
             QMessageBox.warning(self, "Error", "Please enter a valid numeric Process ID")
@@ -2162,14 +2605,19 @@ class OrbitalStationUI(QMainWindow):
                             self.memory_output.append(f"    - {warning}")
                         self.memory_output.append("")
                         
-                        # Add to detections pane
+                        # Add to detections pane with correct field names
                         detection_data = {
-                            'timestamp': datetime.now().strftime('%H:%M:%S'),
-                            'process': name,
-                            'pid': str(pid),
-                            'threat': 'Suspicious Process',
+                            'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                            'type': 'Memory Scan',
+                            'name': name,
+                            'pid': pid,
                             'severity': 'Medium' if suspicious_score < 5 else 'High',
-                            'details': '; '.join(warnings)
+                            'description': '; '.join(warnings),
+                            'process': name,
+                            'address': 0,
+                            'size': memory_info.rss if memory_info else 0,
+                            'confidence': min(suspicious_score * 20, 100),
+                            'risk': 'Medium' if suspicious_score < 5 else 'High'
                         }
                         self._add_detection(detection_data)
                     else:
@@ -2471,7 +2919,7 @@ class OrbitalStationUI(QMainWindow):
                                   f"Filesystem scan completed!\n\nFiles Scanned: {self.fs_files_scanned}\nNo threats detected.")
     
     def _quarantine_selected_files(self):
-        """Quarantine selected files from scan results"""
+        """Quarantine selected files from filesystem scan results"""
         selected_rows = set()
         for item in self.fs_results_table.selectedItems():
             selected_rows.add(item.row())
@@ -2481,20 +2929,32 @@ class OrbitalStationUI(QMainWindow):
             return
         
         quarantined_count = 0
-        for row in selected_rows:
-            file_path = self.fs_results_table.item(row, 1).text()
-            try:
-                # Move file to quarantine (implementation would go here)
-                # For now, just update the action column
-                self.fs_results_table.setItem(row, 4, QTableWidgetItem("Quarantined"))
-                quarantined_count += 1
-            except Exception as e:
-                print(f"Failed to quarantine {file_path}: {e}")
+        protected_count = 0
         
-        QMessageBox.information(self, "Quarantine Complete", f"Quarantined {quarantined_count} files.")
+        for row in sorted(selected_rows, reverse=True):
+            file_path = self.fs_results_table.item(row, 1).text()
+            
+            # Safety check - protect system files
+            if self.yara_manager and self.yara_manager.is_system_file_protected(file_path):
+                protected_count += 1
+                continue
+            
+            try:
+                # Perform quarantine
+                if self._quarantine_file(file_path):
+                    self.fs_results_table.setItem(row, 4, QTableWidgetItem("Quarantined"))
+                    self.fs_results_table.item(row, 4).setBackground(QColor('#ffcc00'))
+                    quarantined_count += 1
+            except Exception as e:
+                self.log_output.append(f"Error quarantining {file_path}: {str(e)}")
+        
+        message = f"Quarantined {quarantined_count} files"
+        if protected_count > 0:
+            message += f"\n{protected_count} system files were protected from quarantine"
+        QMessageBox.information(self, "Quarantine Complete", message)
     
     def _delete_selected_files(self):
-        """Delete selected files from scan results"""
+        """Delete selected files from filesystem scan results"""
         selected_rows = set()
         for item in self.fs_results_table.selectedItems():
             selected_rows.add(item.row())
@@ -2513,17 +2973,30 @@ class OrbitalStationUI(QMainWindow):
         
         if reply == QMessageBox.Yes:
             deleted_count = 0
-            for row in selected_rows:
-                file_path = self.fs_results_table.item(row, 1).text()
-                try:
-                    # Delete file (implementation would go here)
-                    # For now, just update the action column
-                    self.fs_results_table.setItem(row, 4, QTableWidgetItem("Deleted"))
-                    deleted_count += 1
-                except Exception as e:
-                    print(f"Failed to delete {file_path}: {e}")
+            protected_count = 0
             
-            QMessageBox.information(self, "Deletion Complete", f"Deleted {deleted_count} files.")
+            for row in sorted(selected_rows, reverse=True):
+                file_path = self.fs_results_table.item(row, 1).text()
+                
+                # Safety check - protect system files
+                if self.yara_manager and self.yara_manager.is_system_file_protected(file_path):
+                    protected_count += 1
+                    continue
+                
+                try:
+                    import os
+                    if os.path.exists(file_path):
+                        os.remove(file_path)
+                        self.fs_results_table.setItem(row, 4, QTableWidgetItem("Deleted"))
+                        self.fs_results_table.item(row, 4).setBackground(QColor('#cc0000'))
+                        deleted_count += 1
+                except Exception as e:
+                    self.log_output.append(f"Error deleting {file_path}: {str(e)}")
+            
+            message = f"Deleted {deleted_count} files"
+            if protected_count > 0:
+                message += f"\n{protected_count} system files were protected from deletion"
+            QMessageBox.information(self, "Deletion Complete", message)
     
     def _export_scan_results(self):
         """Export scan results to a file"""
@@ -2677,28 +3150,175 @@ class OrbitalStationUI(QMainWindow):
         self.quarantine_table.setRowCount(0)
         
         try:
-            for item in self.quarantine_dir.iterdir():
-                if item.is_file():
+            quarantine_dir = Path("quarantine")
+            if not quarantine_dir.exists():
+                self.log_output.append("Quarantine directory does not exist")
+                return
+            
+            # Load quarantine log if available
+            quarantine_log_path = quarantine_dir / "quarantine_log.json"
+            log_data = {}
+            if quarantine_log_path.exists():
+                try:
+                    import json
+                    with open(quarantine_log_path, 'r') as f:
+                        log_entries = json.load(f)
+                        log_data = {entry['quarantine_path']: entry for entry in log_entries}
+                except Exception as e:
+                    self.log_output.append(f"Warning: Could not load quarantine log: {str(e)}")
+            
+            for item in quarantine_dir.iterdir():
+                if item.is_file() and item.name != "quarantine_log.json":
                     row = self.quarantine_table.rowCount()
                     self.quarantine_table.insertRow(row)
                     
+                    # Get info from log or use defaults
+                    entry = log_data.get(str(item), {})
+                    original_path = entry.get('original_path', 'Unknown')
+                    threat_type = entry.get('threat_type', 'Unknown')
+                    
                     self.quarantine_table.setItem(row, 0, QTableWidgetItem(item.name))
-                    self.quarantine_table.setItem(row, 1, QTableWidgetItem("Unknown"))
+                    self.quarantine_table.setItem(row, 1, QTableWidgetItem(original_path))
                     self.quarantine_table.setItem(row, 2, QTableWidgetItem(
                         datetime.fromtimestamp(item.stat().st_mtime).strftime("%Y-%m-%d %H:%M:%S")
                     ))
-                    self.quarantine_table.setItem(row, 3, QTableWidgetItem("Unknown"))
+                    self.quarantine_table.setItem(row, 3, QTableWidgetItem(threat_type))
                     
         except Exception as e:
             self.log_output.append(f"Error refreshing quarantine: {str(e)}")
             
     def _restore_quarantined(self):
         """Restore quarantined file"""
-        self.log_output.append("Restore quarantined functionality not yet implemented")
+        selected_rows = set()
+        for item in self.quarantine_table.selectedItems():
+            selected_rows.add(item.row())
         
+        if not selected_rows:
+            QMessageBox.warning(self, "No Selection", "Please select files to restore.")
+            return
+        
+        restored_count = 0
+        quarantine_dir = Path("quarantine")
+        quarantine_log_path = quarantine_dir / "quarantine_log.json"
+        
+        # Load quarantine log
+        log_entries = []
+        if quarantine_log_path.exists():
+            try:
+                import json
+                with open(quarantine_log_path, 'r') as f:
+                    log_entries = json.load(f)
+            except Exception as e:
+                self.log_output.append(f"Error loading quarantine log: {str(e)}")
+                return
+        
+        for row in sorted(selected_rows, reverse=True):
+            quarantine_filename = self.quarantine_table.item(row, 0).text()
+            quarantine_path = quarantine_dir / quarantine_filename
+            
+            # Find original path from log
+            original_path = None
+            for entry in log_entries:
+                if entry.get('quarantine_path') == str(quarantine_path):
+                    original_path = entry.get('original_path')
+                    break
+            
+            if not original_path:
+                self.log_output.append(f"⚠️ Could not find original path for {quarantine_filename}")
+                continue
+            
+            try:
+                import shutil
+                import os
+                
+                if quarantine_path.exists():
+                    # Restore to original location
+                    os.makedirs(os.path.dirname(original_path), exist_ok=True)
+                    shutil.move(str(quarantine_path), original_path)
+                    
+                    # Remove from log
+                    log_entries = [e for e in log_entries if e.get('quarantine_path') != str(quarantine_path)]
+                    
+                    self.quarantine_table.removeRow(row)
+                    restored_count += 1
+                    self.log_output.append(f"✓ Restored: {original_path}")
+            except Exception as e:
+                self.log_output.append(f"Error restoring {quarantine_filename}: {str(e)}")
+        
+        # Save updated log
+        if quarantine_log_path.exists():
+            try:
+                import json
+                with open(quarantine_log_path, 'w') as f:
+                    json.dump(log_entries, f, indent=2)
+            except Exception as e:
+                self.log_output.append(f"Warning: Could not update quarantine log: {str(e)}")
+        
+        QMessageBox.information(self, "Restore Complete", f"Restored {restored_count} files.")
+         
     def _delete_quarantined(self):
         """Permanently delete quarantined file"""
-        self.log_output.append("Delete quarantined functionality not yet implemented")
+        selected_rows = set()
+        for item in self.quarantine_table.selectedItems():
+            selected_rows.add(item.row())
+        
+        if not selected_rows:
+            QMessageBox.warning(self, "No Selection", "Please select files to delete.")
+            return
+        
+        reply = QMessageBox.question(
+            self, "Confirm Permanent Deletion",
+            f"Are you sure you want to permanently delete {len(selected_rows)} quarantined files?\n\nThis action cannot be undone!",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        
+        if reply != QMessageBox.Yes:
+            return
+        
+        deleted_count = 0
+        quarantine_dir = Path("quarantine")
+        quarantine_log_path = quarantine_dir / "quarantine_log.json"
+        
+        # Load quarantine log
+        log_entries = []
+        if quarantine_log_path.exists():
+            try:
+                import json
+                with open(quarantine_log_path, 'r') as f:
+                    log_entries = json.load(f)
+            except Exception as e:
+                self.log_output.append(f"Error loading quarantine log: {str(e)}")
+                return
+        
+        for row in sorted(selected_rows, reverse=True):
+            quarantine_filename = self.quarantine_table.item(row, 0).text()
+            quarantine_path = quarantine_dir / quarantine_filename
+            
+            try:
+                import os
+                if quarantine_path.exists():
+                    os.remove(quarantine_path)
+                    
+                    # Remove from log
+                    log_entries = [e for e in log_entries if e.get('quarantine_path') != str(quarantine_path)]
+                    
+                    self.quarantine_table.removeRow(row)
+                    deleted_count += 1
+                    self.log_output.append(f"🗑️ Permanently deleted: {quarantine_filename}")
+            except Exception as e:
+                self.log_output.append(f"Error deleting {quarantine_filename}: {str(e)}")
+        
+        # Save updated log
+        if quarantine_log_path.exists():
+            try:
+                import json
+                with open(quarantine_log_path, 'w') as f:
+                    json.dump(log_entries, f, indent=2)
+            except Exception as e:
+                self.log_output.append(f"Warning: Could not update quarantine log: {str(e)}")
+        
+        QMessageBox.information(self, "Deletion Complete", f"Permanently deleted {deleted_count} files.")
         
     # === DETECTION METHODS ===
     
@@ -2785,6 +3405,18 @@ class OrbitalStationUI(QMainWindow):
             self.log_output.append(f"Protection initialization error: {str(e)}")
 
     # === SCAN RESULTS TAB METHODS ===
+    
+    def _add_to_scan_results(self, detection):
+        """Add detection to scan results table (converts detection format to scan results format)"""
+        threat_info = {
+            'name': detection.get('name', detection.get('type', 'Unknown')),
+            'path': detection.get('path', f"PID: {detection.get('pid', 'N/A')}"),
+            'type': detection.get('type', 'Detection'),
+            'severity': detection.get('severity', 'Medium'),
+            'action': 'Detected',
+            'details': detection.get('description', detection.get('details', ''))
+        }
+        self._add_to_scan_results_tab(threat_info)
     
     def _add_to_scan_results_tab(self, threat_info):
         """Add threat to the dedicated scan results tab"""
@@ -3063,7 +3695,7 @@ class OrbitalStationUI(QMainWindow):
     def remove_infected_file(self):
         """Remove infected file from filesystem"""
         try:
-            current_tab = self.main_tabs.currentIndex()
+            current_tab = self.tabs.currentIndex()
             
             if current_tab == 1:  # Scan Results tab
                 current_row = self.scan_results_table.currentRow()
@@ -3197,7 +3829,7 @@ class OrbitalStationUI(QMainWindow):
     def quarantine_file(self):
         """Quarantine selected file"""
         try:
-            current_tab = self.main_tabs.currentIndex()
+            current_tab = self.tabs.currentIndex()
             
             if current_tab == 1:  # Scan Results tab
                 current_row = self.scan_results_table.currentRow()
@@ -4139,5 +4771,5 @@ class OrbitalStationUI(QMainWindow):
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     ui = OrbitalStationUI()
-    ui.show()
+    # show() is called inside __init__ now
     sys.exit(app.exec())
