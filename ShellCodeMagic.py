@@ -2053,6 +2053,51 @@ class ShellCodeTome:
         self.Disassembler = CodeDisassembler()
         self.total_detections = 0
         # Use provided components or create built-in versions
+
+    def _json_safe(self, value):
+        """Convert values to JSON-safe structures while preserving bytes content."""
+        if isinstance(value, bytes):
+            return {'__bytes_hex__': value.hex()}
+        if isinstance(value, datetime):
+            return value.isoformat()
+        if isinstance(value, dict):
+            return {k: self._json_safe(v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [self._json_safe(v) for v in value]
+        if isinstance(value, tuple):
+            return [self._json_safe(v) for v in value]
+        if isinstance(value, set):
+            return [self._json_safe(v) for v in value]
+        return value
+
+    def _json_restore(self, value):
+        """Restore JSON-safe structures back into their original in-memory types."""
+        if isinstance(value, dict):
+            if set(value.keys()) == {'__bytes_hex__'}:
+                try:
+                    return bytes.fromhex(value['__bytes_hex__'])
+                except (TypeError, ValueError):
+                    return b''
+            return {k: self._json_restore(v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [self._json_restore(v) for v in value]
+        return value
+
+    def _build_spell_id(self, entry):
+        """Build a stable spell ID so repeated encounters update the same spell."""
+        existing_id = entry.get('spell_id')
+        if existing_id:
+            return existing_id
+
+        identity = {
+            'type': entry.get('type', 'Unknown Spell'),
+            'process': entry.get('process', 'Unknown'),
+            'location': entry.get('location', ''),
+            'address': entry.get('address', ''),
+            'shellcode': entry.get('shellcode', b''),
+        }
+        canonical = json.dumps(self._json_safe(identity), sort_keys=True)
+        return hashlib.sha256(canonical.encode('utf-8')).hexdigest()[:16]
     
     def ensure_tome_directory(self):
         """Ensure the ancient tome's directory structure exists"""
@@ -2093,6 +2138,22 @@ class ShellCodeTome:
                     updated_date TEXT NOT NULL
                 )
             ''')
+
+            # Create encounter history table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS spell_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    spell_id TEXT NOT NULL,
+                    category TEXT NOT NULL,
+                    spell_name TEXT NOT NULL,
+                    timestamp TEXT NOT NULL,
+                    process_name TEXT,
+                    memory_address TEXT,
+                    confidence_level TEXT,
+                    details TEXT,
+                    FOREIGN KEY (spell_id) REFERENCES ancient_spells(id)
+                )
+            ''')
             
             conn.commit()
             conn.close()
@@ -2117,6 +2178,8 @@ class ShellCodeTome:
                             self.tome_wisdom[key] = int(value)
                         elif key == 'learning_velocity':
                             self.tome_wisdom[key] = float(value)
+                        elif key in ['rarest_spells', 'ancient_knowledge_unlocked']:
+                            self.tome_wisdom[key] = json.loads(value)
                         else:
                             self.tome_wisdom[key] = value
                     except (json.JSONDecodeError, ValueError):
@@ -2128,6 +2191,11 @@ class ShellCodeTome:
                 if category in self.detections:
                     # We'll load actual spells on demand to save memory
                     self.tome_wisdom['categories_discovered'].add(category)
+
+            # Keep learned count aligned with persisted unique spells
+            cursor.execute('SELECT COUNT(*) FROM ancient_spells')
+            row = cursor.fetchone()
+            self.tome_wisdom['total_spells_learned'] = row[0] if row else 0
             
             conn.close()
             
@@ -2148,6 +2216,8 @@ class ShellCodeTome:
             for key, value in self.tome_wisdom.items():
                 if key == 'categories_discovered':
                     value_str = json.dumps(list(value))
+                elif isinstance(value, (list, dict, set)):
+                    value_str = json.dumps(self._json_safe(value))
                 else:
                     value_str = str(value)
                     
@@ -2199,22 +2269,36 @@ class ShellCodeTome:
             category = 'unknown_magic'
             
         # Enhanced entry with magical metadata
+        now_iso = datetime.now().isoformat()
+        spell_id = self._build_spell_id(entry)
         enhanced_entry = {
             **entry,
-            'spell_id': hashlib.sha256(str(entry).encode()).hexdigest()[:16],
-            'discovered_at': datetime.now().isoformat(),
+            'spell_id': spell_id,
+            'discovered_at': now_iso,
             'power_rating': self._calculate_spell_power(entry),
             'tome_wisdom_level': self.tome_wisdom['power_level']
         }
-        
-        # Add to memory collection
-        self.detections[category].append(enhanced_entry)
-        self.total_detections += 1
-        
+
+        # Add/update in memory collection
+        existing_idx = next(
+            (i for i, existing in enumerate(self.detections[category]) if existing.get('spell_id') == spell_id),
+            None
+        )
+        is_new_spell = existing_idx is None
+        if is_new_spell:
+            self.detections[category].append(enhanced_entry)
+            self.total_detections += 1
+        else:
+            previous = self.detections[category][existing_idx]
+            merged_entry = {**previous, **enhanced_entry}
+            merged_entry['first_discovered_at'] = previous.get('first_discovered_at', previous.get('discovered_at', now_iso))
+            self.detections[category][existing_idx] = merged_entry
+
         # Update tome wisdom
-        self.tome_wisdom['total_spells_learned'] += 1
+        if is_new_spell:
+            self.tome_wisdom['total_spells_learned'] += 1
         self.tome_wisdom['categories_discovered'].add(category)
-        self.tome_wisdom['last_learning_session'] = datetime.now().isoformat()
+        self.tome_wisdom['last_learning_session'] = now_iso
         
         # Calculate learning velocity
         if self.tome_wisdom['tome_creation_date']:
@@ -2233,7 +2317,10 @@ class ShellCodeTome:
         self.save_ancient_wisdom()
         
         # Log the mystical learning event
-        logging.info(f"🌟 New {category} spell learned! Tome power level: {self.tome_wisdom['power_level']}")
+        if is_new_spell:
+            logging.info(f"🌟 New {category} spell learned! Tome power level: {self.tome_wisdom['power_level']}")
+        else:
+            logging.info(f"🔄 Existing {category} spell updated. Tome power level: {self.tome_wisdom['power_level']}")
         
         return True
     
@@ -2317,10 +2404,10 @@ class ShellCodeTome:
                 'id': entry.get('spell_id'),
                 'category': category,
                 'spell_name': entry.get('type', 'Unknown Spell'),
-                'pattern_data': json.dumps(entry).encode('utf-8'),
+                'pattern_data': json.dumps(self._json_safe(entry)).encode('utf-8'),
                 'discovery_date': entry.get('discovered_at'),
                 'process_name': entry.get('process', 'Unknown'),
-                'memory_address': entry.get('location', ''),
+                'memory_address': entry.get('location') or str(entry.get('address', '')),
                 'entropy': entry.get('entropy', 0.0),
                 'confidence_level': entry.get('confidence', 'medium'),
                 'power_rating': entry.get('power_rating', 1),
@@ -2328,7 +2415,7 @@ class ShellCodeTome:
                 'last_seen': entry.get('discovered_at'),
                 'disassembly': entry.get('disassembly', ''),
                 'metadata': json.dumps({
-                    'details': entry.get('details', ''),
+                    'details': self._json_safe(entry.get('details', '')),
                     'tome_power_level': entry.get('tome_wisdom_level', 1)
                 })
             }
@@ -2341,9 +2428,33 @@ class ShellCodeTome:
                 # Update existing spell
                 cursor.execute('''
                     UPDATE ancient_spells 
-                    SET times_encountered = times_encountered + 1, last_seen = ?
+                    SET category = ?,
+                        spell_name = ?,
+                        pattern_data = ?,
+                        process_name = ?,
+                        memory_address = ?,
+                        entropy = ?,
+                        confidence_level = ?,
+                        power_rating = ?,
+                        times_encountered = times_encountered + 1,
+                        last_seen = ?,
+                        disassembly = ?,
+                        metadata = ?
                     WHERE id = ?
-                ''', (datetime.now().isoformat(), spell_data['id']))
+                ''', (
+                    spell_data['category'],
+                    spell_data['spell_name'],
+                    spell_data['pattern_data'],
+                    spell_data['process_name'],
+                    spell_data['memory_address'],
+                    spell_data['entropy'],
+                    spell_data['confidence_level'],
+                    spell_data['power_rating'],
+                    datetime.now().isoformat(),
+                    spell_data['disassembly'],
+                    spell_data['metadata'],
+                    spell_data['id']
+                ))
             else:
                 # Insert new spell
                 cursor.execute('''
@@ -2353,12 +2464,67 @@ class ShellCodeTome:
                         power_rating, times_encountered, last_seen, disassembly, metadata
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', tuple(spell_data.values()))
+
+            cursor.execute('''
+                INSERT INTO spell_history (
+                    spell_id, category, spell_name, timestamp, process_name,
+                    memory_address, confidence_level, details
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                spell_data['id'],
+                spell_data['category'],
+                spell_data['spell_name'],
+                datetime.now().isoformat(),
+                spell_data['process_name'],
+                spell_data['memory_address'],
+                spell_data['confidence_level'],
+                json.dumps(self._json_safe(entry.get('details', '')))
+            ))
             
             conn.commit()
             conn.close()
             
         except Exception as e:
             logging.error(f"Failed to persist spell to database: {str(e)}")
+
+    def get_spell_history(self, category, spell_name, limit=100):
+        """Return chronological encounter history for a spell."""
+        try:
+            conn = sqlite3.connect(self.tome_path)
+            cursor = conn.cursor()
+
+            cursor.execute('''
+                SELECT timestamp, process_name, memory_address, confidence_level, details
+                FROM spell_history
+                WHERE category = ? AND spell_name = ?
+                ORDER BY timestamp ASC
+                LIMIT ?
+            ''', (category, spell_name, limit))
+
+            rows = cursor.fetchall()
+            conn.close()
+
+            history = []
+            for timestamp, process_name, memory_address, confidence_level, details in rows:
+                try:
+                    parsed_details = json.loads(details) if details else ''
+                    parsed_details = self._json_restore(parsed_details)
+                except (json.JSONDecodeError, TypeError):
+                    parsed_details = details
+
+                history.append({
+                    'timestamp': timestamp,
+                    'process': process_name,
+                    'location': memory_address,
+                    'confidence': confidence_level,
+                    'details': parsed_details,
+                })
+
+            return history
+
+        except Exception as e:
+            logging.error(f"Failed to get spell history: {str(e)}")
+            return []
     
     def browse_ancient_spells(self, category=None, limit=50, offset=0):
         """🔍 Browse the ancient spells stored in the tome"""
@@ -2423,7 +2589,7 @@ class ShellCodeTome:
                     'id': row[0],
                     'category': row[1],
                     'spell_name': row[2],
-                    'pattern_data': json.loads(row[3].decode('utf-8')),
+                    'pattern_data': self._json_restore(json.loads(row[3].decode('utf-8'))),
                     'discovery_date': row[4],
                     'process_name': row[5],
                     'memory_address': row[6],
@@ -2433,7 +2599,7 @@ class ShellCodeTome:
                     'times_encountered': row[10],
                     'last_seen': row[11],
                     'disassembly': row[12],
-                    'metadata': json.loads(row[13]) if row[13] else {}
+                    'metadata': self._json_restore(json.loads(row[13])) if row[13] else {}
                 }
                 
                 conn.close()
