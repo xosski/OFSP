@@ -3,7 +3,7 @@
         meta:
             description = "Basic detection rule for custom"
             author = "YaraRuleManager"
-            created = "2026-03-29"
+            created = "2026-03-30"
         
         strings:
             $str1 = "suspicious" nocase
