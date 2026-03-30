@@ -2242,28 +2242,31 @@ class ShellCodeTome:
         base_power = 1
         
         # Boost power based on confidence
-        confidence = entry.get('confidence', 'medium').lower()
+        confidence = str(entry.get('confidence', 'medium')).lower()
         if confidence == 'high':
             base_power += 2
         elif confidence == 'medium':
             base_power += 1
             
         # Boost for certain types of magic
-        entry_type = entry.get('type', '').lower()
+        entry_type = str(entry.get('type', '')).lower()
         if any(keyword in entry_type for keyword in ['injection', 'hollowing', 'evasion']):
             base_power += 3
         elif any(keyword in entry_type for keyword in ['xor', 'encoding', 'obfuscation']):
             base_power += 2
             
         # Boost for rarity (less common patterns are more powerful)
-        if entry_type and len([e for e in self.detections.get(self._get_category_for_type(entry_type), []) if e.get('type', '').lower() == entry_type]) < 5:
+        if entry_type and len([
+            e for e in self.detections.get(self._get_category_for_type(entry_type), [])
+            if str(e.get('type', '')).lower() == entry_type
+        ]) < 5:
             base_power += 1
-            
+        
         return min(10, base_power)  # Cap at 10
-    
+
     def _get_category_for_type(self, entry_type):
         """Determine the appropriate category for a detection type"""
-        entry_type = entry_type.lower()
+        entry_type = str(entry_type).lower()
         
         if 'api' in entry_type and 'hash' in entry_type:
             return 'api_hashing'

@@ -645,6 +645,34 @@ class OrbitalStationUI(QMainWindow):
         except Exception:
             return 0
 
+    def _resolve_actionable_file_path(self, table, row, path_column=1):
+        """Return a valid filesystem path from a table row, or None if not actionable."""
+        path_item = table.item(row, path_column)
+        if not path_item:
+            return None
+
+        file_path = str(path_item.text()).strip()
+        if not file_path:
+            return None
+
+        file_path_lower = file_path.lower()
+        if file_path_lower in ('n/a', 'na'):
+            return None
+        if file_path_lower.startswith('pid:') or file_path_lower.startswith('memory:'):
+            return None
+
+        return file_path
+
+    def _is_system_file_protected(self, file_path):
+        """Safely check whether a file is protected by policy."""
+        try:
+            yara_manager = getattr(self, 'yara_manager', None)
+            if yara_manager and hasattr(yara_manager, 'is_system_file_protected'):
+                return bool(yara_manager.is_system_file_protected(file_path))
+        except Exception as e:
+            self.log_output.append(f"⚠️ Protection check failed for {file_path}: {str(e)}")
+        return False
+
     def _should_auto_quarantine(self, detection):
         if not self.auto_quarantine_enabled:
             return False
@@ -672,7 +700,7 @@ class OrbitalStationUI(QMainWindow):
             self.auto_ingested_signatures.add(detection_sig)
 
             if hasattr(self, 'shellcode_tome') and self.shellcode_tome:
-                category = self._classify_detection_type(detection.get('type', 'Unknown')) if hasattr(self, '_classify_detection_type') else 'unknown_magic'
+                category = self._classify_detection_type(str(detection.get('type', 'Unknown'))) if hasattr(self, '_classify_detection_type') else 'unknown_magic'
                 tome_entry = {
                     'type': detection.get('type', 'Unknown'),
                     'process': detection.get('name', detection.get('process', 'Unknown')),
@@ -2647,7 +2675,7 @@ class OrbitalStationUI(QMainWindow):
             self._add_live_detection(detection)
             
         # Add to shellcode detection tab if it's a shellcode/memory detection
-        detection_type = detection.get('type', '').lower()
+        detection_type = str(detection.get('type', '')).lower()
         if 'shellcode' in detection_type or 'memory' in detection_type or 'injection' in detection_type:
             self._add_shellcode_detection(detection)
 
@@ -3127,7 +3155,7 @@ class OrbitalStationUI(QMainWindow):
         for col, item in enumerate(items):
             table_item = QTableWidgetItem(str(item))
             # Color code by severity
-            severity = threat_info.get('severity', 'Medium').lower()
+            severity = str(threat_info.get('severity', 'Medium')).lower()
             if severity == 'high':
                 table_item.setBackground(QColor('#ff4444'))
             elif severity == 'medium':
@@ -3199,12 +3227,17 @@ class OrbitalStationUI(QMainWindow):
         
         quarantined_count = 0
         protected_count = 0
+        skipped_count = 0
         
         for row in sorted(selected_rows, reverse=True):
-            file_path = self.fs_results_table.item(row, 1).text()
-            
+            file_path = self._resolve_actionable_file_path(self.fs_results_table, row, 1)
+            if not file_path:
+                skipped_count += 1
+                self.log_output.append(f"⚠️ Skipping quarantine for non-file scan result row {row + 1}")
+                continue
+
             # Safety check - protect system files
-            if self.yara_manager and self.yara_manager.is_system_file_protected(file_path):
+            if self._is_system_file_protected(file_path):
                 protected_count += 1
                 continue
             
@@ -3220,6 +3253,8 @@ class OrbitalStationUI(QMainWindow):
         message = f"Quarantined {quarantined_count} files"
         if protected_count > 0:
             message += f"\n{protected_count} system files were protected from quarantine"
+        if skipped_count > 0:
+            message += f"\n{skipped_count} entries were skipped because they do not reference filesystem paths"
         QMessageBox.information(self, "Quarantine Complete", message)
     
     def _delete_selected_files(self):
@@ -3243,12 +3278,17 @@ class OrbitalStationUI(QMainWindow):
         if reply == QMessageBox.Yes:
             deleted_count = 0
             protected_count = 0
+            skipped_count = 0
             
             for row in sorted(selected_rows, reverse=True):
-                file_path = self.fs_results_table.item(row, 1).text()
-                
+                file_path = self._resolve_actionable_file_path(self.fs_results_table, row, 1)
+                if not file_path:
+                    skipped_count += 1
+                    self.log_output.append(f"⚠️ Skipping delete for non-file scan result row {row + 1}")
+                    continue
+
                 # Safety check - protect system files
-                if self.yara_manager and self.yara_manager.is_system_file_protected(file_path):
+                if self._is_system_file_protected(file_path):
                     protected_count += 1
                     continue
                 
@@ -3265,6 +3305,8 @@ class OrbitalStationUI(QMainWindow):
             message = f"Deleted {deleted_count} files"
             if protected_count > 0:
                 message += f"\n{protected_count} system files were protected from deletion"
+            if skipped_count > 0:
+                message += f"\n{skipped_count} entries were skipped because they do not reference filesystem paths"
             QMessageBox.information(self, "Deletion Complete", message)
     
     def _export_scan_results(self):
@@ -3729,7 +3771,7 @@ class OrbitalStationUI(QMainWindow):
         for col, item in enumerate(items):
             table_item = QTableWidgetItem(str(item))
             # Color code by severity
-            severity = threat_info.get('severity', 'Medium').lower()
+            severity = str(threat_info.get('severity', 'Medium')).lower()
             if severity == 'high':
                 table_item.setBackground(QColor('#ff4444'))
             elif severity == 'medium':
@@ -3782,13 +3824,18 @@ class OrbitalStationUI(QMainWindow):
         
         quarantined_count = 0
         protected_count = 0
+        skipped_count = 0
         
         for row in sorted(selected_rows, reverse=True):
-            file_path = self.scan_results_table.item(row, 1).text()
+            file_path = self._resolve_actionable_file_path(self.scan_results_table, row, 1)
+            if not file_path:
+                skipped_count += 1
+                self.log_output.append(f"⚠️ Skipping quarantine for non-file threat row {row + 1}")
+                continue
             self.threat_name = self.scan_results_table.item(row, 0).text()
-            
+
             # Safety check - protect system files
-            if self.yara_manager and self.yara_manager.is_system_file_protected(file_path):
+            if self._is_system_file_protected(file_path):
                 protected_count += 1
                 continue
             
@@ -3807,7 +3854,9 @@ class OrbitalStationUI(QMainWindow):
         message = f"Quarantined {quarantined_count} threats"
         if protected_count > 0:
             message += f"\n{protected_count} system files were protected from quarantine"
-        
+        if skipped_count > 0:
+            message += f"\n{skipped_count} entries were skipped because they do not reference filesystem paths"
+
         QMessageBox.information(self, "Quarantine Complete", message)
     
     def _delete_selected_results(self):
@@ -3834,10 +3883,16 @@ class OrbitalStationUI(QMainWindow):
         
         deleted_count = 0
         protected_count = 0
+        skipped_count = 0
         
         for row in sorted(selected_rows, reverse=True):
-            file_path = self.scan_results_table.item(row, 1).text()
-            is_system_file_protected = self.yara_manager.is_system_file_protected(file_path)
+            file_path = self._resolve_actionable_file_path(self.scan_results_table, row, 1)
+            if not file_path:
+                skipped_count += 1
+                self.log_output.append(f"⚠️ Skipping delete for non-file threat row {row + 1}")
+                continue
+
+            is_system_file_protected = self._is_system_file_protected(file_path)
             # Safety check - protect system files
             if is_system_file_protected:
                 protected_count += 1
@@ -3859,6 +3914,8 @@ class OrbitalStationUI(QMainWindow):
         message = f"Deleted {deleted_count} threats"
         if protected_count > 0:
             message += f"\n{protected_count} system files were protected from deletion"
+        if skipped_count > 0:
+            message += f"\n{skipped_count} entries were skipped because they do not reference filesystem paths"
         
         QMessageBox.information(self, "Deletion Complete", message)
     
@@ -4068,6 +4125,16 @@ class OrbitalStationUI(QMainWindow):
             import shutil
             import uuid
             import json
+
+            file_path = str(file_path).strip()
+            if not file_path:
+                self.log_output.append("⚠️ Empty file path provided for quarantine")
+                return False
+
+            file_path_lower = file_path.lower()
+            if file_path_lower.startswith('pid:') or file_path_lower.startswith('memory:') or file_path_lower in ('n/a', 'na'):
+                self.log_output.append(f"⚠️ Non-filesystem path cannot be quarantined: {file_path}")
+                return False
             
             # Ensure quarantine directory exists
             quarantine_dir = Path("quarantine")
@@ -4482,7 +4549,7 @@ class OrbitalStationUI(QMainWindow):
     
     def _classify_detection_type(self, detection_type):
         """🔮 Classify detection type into tome spell category"""
-        detection_type = detection_type.lower()
+        detection_type = str(detection_type).lower()
         
         if 'api' in detection_type and 'hash' in detection_type:
             return 'api_hashing'
@@ -4950,7 +5017,7 @@ class OrbitalStationUI(QMainWindow):
                     color = QColor('#44ff44')  # Low power - green
                 items[5].setBackground(color)
             else:
-                risk = spell_data.get('risk', 'Medium').lower()
+                risk = str(spell_data.get('risk', 'Medium')).lower()
                 if risk == 'high':
                     color = QColor('#ff4444')
                 elif risk == 'medium':

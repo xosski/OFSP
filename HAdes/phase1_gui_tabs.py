@@ -7,14 +7,26 @@ Provides UI components for:
 """
 
 import logging
-from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QTabWidget, QPushButton, QTextEdit,
-    QLabel, QLineEdit, QComboBox, QSpinBox, QCheckBox, QTableWidget,
-    QTableWidgetItem, QListWidget, QListWidgetItem, QSplitter, QGroupBox,
-    QFormLayout, QMessageBox, QProgressBar, QFileDialog, QPlainTextEdit
-)
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
-from PyQt6.QtGui import QFont, QColor, QTextCursor
+try:
+    QT_BACKEND = "PyQt6"
+    from PyQt6.QtWidgets import (
+        QWidget, QVBoxLayout, QHBoxLayout, QTabWidget, QPushButton, QTextEdit,
+        QLabel, QLineEdit, QComboBox, QSpinBox, QCheckBox, QTableWidget,
+        QTableWidgetItem, QListWidget, QListWidgetItem, QSplitter, QGroupBox,
+        QFormLayout, QMessageBox, QProgressBar, QFileDialog, QPlainTextEdit
+    )
+    from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
+    from PyQt6.QtGui import QFont, QColor, QTextCursor
+except Exception:
+    QT_BACKEND = "PySide6"
+    from PySide6.QtWidgets import (
+        QWidget, QVBoxLayout, QHBoxLayout, QTabWidget, QPushButton, QTextEdit,
+        QLabel, QLineEdit, QComboBox, QSpinBox, QCheckBox, QTableWidget,
+        QTableWidgetItem, QListWidget, QListWidgetItem, QSplitter, QGroupBox,
+        QFormLayout, QMessageBox, QProgressBar, QFileDialog, QPlainTextEdit
+    )
+    from PySide6.QtCore import Qt, QThread, Signal as pyqtSignal, QTimer
+    from PySide6.QtGui import QFont, QColor, QTextCursor
 
 from modules.obsidian_core_integration import get_obsidian_core
 from modules.ethical_control_integration import get_ethical_control

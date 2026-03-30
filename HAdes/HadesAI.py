@@ -156,7 +156,7 @@ try:
     from modules.malware_engine_integration import get_malware_engine
     from phase1_gui_tabs import ObsidianCoreTab, EthicalControlTab, MalwareEngineTab
     HAS_PHASE1_INTEGRATION = True
-except ImportError as e:
+except Exception as e:
     logging.getLogger("HadesAI").warning(f"Phase 1 Integration failed: {str(e)}")
     HAS_PHASE1_INTEGRATION = False
 
