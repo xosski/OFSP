@@ -477,6 +477,10 @@ class OrbitalStationUI(QMainWindow):
         self.threats_found = 0
         self.detections = []
         self.scan_worker = None
+        self.auto_quarantine_enabled = True
+        self.auto_quarantine_min_severity = 'High'
+        self.auto_quarantine_min_confidence = 70
+        self.auto_ingested_signatures = set()
         
         # Pre-initialize backend attributes to None
         self.memory_scanner = None
@@ -608,13 +612,129 @@ class OrbitalStationUI(QMainWindow):
                 print("HadesAI components initialized")
             except Exception as e:
                 print(f"HadesAI initialization error: {e}")
-        
+
         # Critical processes that should not be terminated
         self.critical_processes = {
-            'explorer.exe', 'svchost.exe', 'lsass.exe', 
+            'explorer.exe', 'svchost.exe', 'lsass.exe',
             'winlogon.exe', 'csrss.exe', 'services.exe',
             'smss.exe', 'wininit.exe', 'System'
         }
+
+    def _severity_score(self, severity):
+        mapping = {'low': 1, 'medium': 2, 'high': 3, 'critical': 4}
+        return mapping.get(str(severity).lower(), 2)
+
+    def _normalize_confidence(self, value):
+        if value is None:
+            return 0
+        if isinstance(value, (int, float)):
+            try:
+                return max(0, min(100, int(value)))
+            except Exception:
+                return 0
+
+        text = str(value).strip().lower().replace('%', '')
+        if text in ('high', 'strong'):
+            return 85
+        if text in ('medium', 'moderate'):
+            return 60
+        if text in ('low', 'weak'):
+            return 30
+        try:
+            return max(0, min(100, int(float(text))))
+        except Exception:
+            return 0
+
+    def _should_auto_quarantine(self, detection):
+        if not self.auto_quarantine_enabled:
+            return False
+
+        severity_ok = self._severity_score(detection.get('severity', 'Medium')) >= self._severity_score(self.auto_quarantine_min_severity)
+        confidence_ok = self._normalize_confidence(detection.get('confidence')) >= self.auto_quarantine_min_confidence
+        detection_type = str(detection.get('type', '')).lower()
+        is_critical_type = any(token in detection_type for token in ['shellcode', 'injection', 'hollowing', 'rwx'])
+
+        return severity_ok or confidence_ok or is_critical_type
+
+    def _ingest_detection_into_knowledge(self, detection):
+        """Persist detection into ShellCode Tome and Hades knowledge base."""
+        try:
+            signature = "|".join([
+                str(detection.get('type', '')),
+                str(detection.get('name', detection.get('process', ''))),
+                str(detection.get('path', '')),
+                str(detection.get('address', '')),
+                str(detection.get('description', detection.get('details', '')))
+            ])
+            detection_sig = hash(signature)
+            if detection_sig in self.auto_ingested_signatures:
+                return
+            self.auto_ingested_signatures.add(detection_sig)
+
+            if hasattr(self, 'shellcode_tome') and self.shellcode_tome:
+                category = self._classify_detection_type(detection.get('type', 'Unknown')) if hasattr(self, '_classify_detection_type') else 'unknown_magic'
+                tome_entry = {
+                    'type': detection.get('type', 'Unknown'),
+                    'process': detection.get('name', detection.get('process', 'Unknown')),
+                    'confidence': self._normalize_confidence(detection.get('confidence')),
+                    'location': detection.get('path', f"Memory: {detection.get('address', 'N/A')}"),
+                    'details': detection.get('description', detection.get('details', 'No details provided')),
+                    'entropy': detection.get('entropy', 0.0),
+                    'disassembly': detection.get('disassembly', ''),
+                    'shellcode': detection.get('shellcode', b''),
+                    'patterns': detection.get('patterns', []),
+                    'metadata': detection
+                }
+                self.shellcode_tome.add_entry(category, tome_entry)
+
+            if self.hades_kb:
+                class _Finding:
+                    pass
+
+                finding = _Finding()
+                finding.path = str(detection.get('path', detection.get('name', 'N/A')))
+                finding.threat_type = str(detection.get('type', 'Unknown'))
+                finding.pattern = str(detection.get('description', detection.get('details', 'Detection matched policy')))
+                finding.severity = str(detection.get('severity', 'Medium')).upper()
+                finding.code_snippet = str(detection.get('code', detection.get('code_snippet', '')))
+                finding.browser = str(detection.get('browser', 'OFSP'))
+                finding.context = str(detection.get('details', detection.get('description', '')))
+
+                self.hades_kb.store_threat_finding(finding)
+                self.hades_kb.store_learned_exploit(
+                    source_url=str(detection.get('path', 'ofsp://local-detection')),
+                    exploit_type=str(detection.get('type', 'Unknown')),
+                    code=str(detection.get('code', detection.get('code_snippet', detection.get('description', '')))),
+                    description=str(detection.get('description', detection.get('details', 'Auto-ingested from OFSP detection pipeline')))
+                )
+        except Exception as e:
+            if hasattr(self, 'log_output'):
+                self.log_output.append(f"⚠️ Knowledge ingestion warning: {str(e)}")
+
+    def _attempt_auto_quarantine(self, detection):
+        """Automatically quarantine high-risk detections when safe to do so."""
+        if not self._should_auto_quarantine(detection):
+            return
+
+        file_path = detection.get('path')
+        if not file_path or str(file_path).strip() in ('', 'N/A'):
+            return
+
+        file_path = str(file_path)
+        if not os.path.exists(file_path):
+            return
+
+        try:
+            if self.yara_manager and hasattr(self.yara_manager, 'is_system_file_protected'):
+                if self.yara_manager.is_system_file_protected(file_path):
+                    self.log_output.append(f"🛡️ Auto-quarantine skipped protected file: {file_path}")
+                    return
+        except Exception:
+            pass
+
+        if self._quarantine_file(file_path):
+            detection['status'] = 'Auto-Quarantined'
+            self.log_output.append(f"🔒 Auto-quarantined detection artifact: {file_path}")
         
     def _setup_styling(self):
         """Setup the dark cyberpunk styling"""
@@ -2475,6 +2595,16 @@ class OrbitalStationUI(QMainWindow):
         
     def _add_detection(self, detection):
         """Add a new detection to all relevant tables and logs"""
+        # Normalize legacy detection payloads to unified structure
+        if 'type' not in detection and 'threat' in detection:
+            detection['type'] = detection.get('threat', 'Detection')
+        if 'name' not in detection:
+            detection['name'] = detection.get('process', detection.get('path', 'Unknown'))
+        if 'description' not in detection:
+            detection['description'] = detection.get('details', 'Detection event captured')
+        if 'path' not in detection and 'file_path' in detection:
+            detection['path'] = detection.get('file_path')
+
         self.detections.append(detection)
         self.threats_found += 1
         self.threats_label.setText(f"Threats: {self.threats_found}")
@@ -2520,6 +2650,12 @@ class OrbitalStationUI(QMainWindow):
         detection_type = detection.get('type', '').lower()
         if 'shellcode' in detection_type or 'memory' in detection_type or 'injection' in detection_type:
             self._add_shellcode_detection(detection)
+
+        # Persist detection intelligence into Tome + Hades DB
+        self._ingest_detection_into_knowledge(detection)
+
+        # Auto-quarantine risky detections with valid file artifacts
+        self._attempt_auto_quarantine(detection)
 
         # Refresh details panel with newest detection context
         if hasattr(self, 'detection_details_text') and self.detections:
