@@ -9,10 +9,11 @@ import os
 import traceback
 import threading
 import time
+import importlib
 from datetime import datetime
 import psutil
 from pathlib import Path
-import PySide6 
+import PySide6
 # PySide6 imports
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
@@ -48,10 +49,34 @@ try:
 except ImportError:
     ShellCodeMagic = None
 
-try:
-    import HadesAI
-except ImportError:
-    HadesAI = None
+def _load_hades_ai_module():
+    """Load HadesAI, preferring local HAdes workspace when present."""
+    hades_workspace = Path(__file__).resolve().parent / "HAdes"
+    root_module_path = Path(__file__).resolve().parent
+
+    if hades_workspace.exists():
+        hades_path = str(hades_workspace)
+        if hades_path not in sys.path:
+            sys.path.insert(0, hades_path)
+        try:
+            return importlib.import_module("HadesAI")
+        except Exception:
+            # Fall back to root-level module if HAdes import fails
+            sys.modules.pop("HadesAI", None)
+            if hades_path in sys.path:
+                sys.path.remove(hades_path)
+
+    root_path = str(root_module_path)
+    if root_path not in sys.path:
+        sys.path.insert(0, root_path)
+
+    try:
+        return importlib.import_module("HadesAI")
+    except Exception:
+        return None
+
+
+HadesAI = _load_hades_ai_module()
 
 def is_admin():
     """Check if running with administrator privileges"""
@@ -1906,7 +1931,111 @@ class OrbitalStationUI(QMainWindow):
         self.detections_table.setAlternatingRowColors(True)
         layout.addWidget(self.detections_table)
         
+        # Detection detail pane
+        detail_frame = QGroupBox("Detection Details")
+        detail_layout = QVBoxLayout(detail_frame)
+        self.detection_details_text = QTextEdit()
+        self.detection_details_text.setReadOnly(True)
+        self.detection_details_text.setMaximumHeight(220)
+        self.detection_details_text.setPlaceholderText("Select a detection to view full context and recommended response.")
+        detail_layout.addWidget(self.detection_details_text)
+        layout.addWidget(detail_frame)
+
+        self.detections_table.itemSelectionChanged.connect(self._update_detection_details)
+
         self.tabs.addTab(widget, "Detections")
+
+    def _get_detection_recommendation(self, detection):
+        """Return a practical recommendation based on detection context."""
+        detection_type = str(detection.get('type', '')).lower()
+        severity = str(detection.get('severity', 'Medium')).lower()
+        path_text = str(detection.get('path', '')).lower()
+
+        if 'shellcode' in detection_type or 'injection' in detection_type:
+            return "Quarantine related file/artifact, isolate process tree, and capture memory snapshot for forensic triage."
+        if 'yara' in detection_type:
+            return "Review matched rule details and signature family, then quarantine file if path is not trusted/whitelisted."
+        if 'memory' in detection_type:
+            return "Re-scan process with elevated privileges, verify module map, and terminate process if confidence remains high."
+        if 'heuristic' in detection_type:
+            return "Validate file provenance, hash reputation, and execution chain before quarantine/deletion decision."
+        if 'hadesai' in detection_type:
+            return "Open Hades findings for correlated evidence and apply the suggested mitigation workflow for this threat class."
+        if any(s in path_text for s in ['temp', 'appdata', 'downloads']):
+            return "Treat as potentially staged payload; quarantine first, then inspect parent process and startup persistence."
+        if severity == 'high':
+            return "Prioritize immediate containment: isolate, quarantine, and investigate related processes and network activity."
+        return "Collect additional telemetry (hash, signer, parent process, command line) and monitor for recurrence."
+
+    def _format_detection_details(self, detection):
+        """Build a thorough, human-readable detail view for a detection."""
+        timestamp = detection.get('timestamp', 'Unknown')
+        detection_type = detection.get('type', 'Unknown')
+        name = detection.get('name', 'Unknown')
+        pid = detection.get('pid', 'N/A')
+        severity = detection.get('severity', 'Medium')
+        description = detection.get('description', detection.get('details', 'No description provided.'))
+        path = detection.get('path', 'N/A')
+        confidence = detection.get('confidence', 'N/A')
+        risk = detection.get('risk', severity)
+        address = detection.get('address', 'N/A')
+        size = detection.get('size', 'N/A')
+        patterns = detection.get('patterns', [])
+        browser = detection.get('browser', '')
+        code_snippet = detection.get('code', detection.get('code_snippet', ''))
+        yara_rule = detection.get('rule', detection.get('yara_rule', ''))
+
+        if isinstance(address, int):
+            address = f"0x{address:08x}"
+
+        pattern_text = ', '.join(map(str, patterns[:6])) if patterns else 'None captured'
+        if len(patterns) > 6:
+            pattern_text += f" (+{len(patterns) - 6} more)"
+
+        lines = [
+            f"Timestamp: {timestamp}",
+            f"Type: {detection_type}",
+            f"Name/Target: {name}",
+            f"PID: {pid}",
+            f"Severity: {severity}",
+            f"Risk Rating: {risk}",
+            f"Confidence: {confidence}",
+            f"Path: {path}",
+            f"Memory Address: {address}",
+            f"Artifact Size: {size}",
+            f"YARA Rule: {yara_rule or 'N/A'}",
+            f"Browser Context: {browser or 'N/A'}",
+            "",
+            "Why This Was Flagged:",
+            f"{description}",
+            "",
+            "Observed Indicators:",
+            f"{pattern_text}",
+        ]
+
+        if code_snippet:
+            lines.extend(["", "Relevant Snippet:", str(code_snippet)[:600]])
+
+        lines.extend([
+            "",
+            "Recommended Action:",
+            self._get_detection_recommendation(detection),
+        ])
+
+        return "\n".join(lines)
+
+    def _update_detection_details(self):
+        """Update detection detail panel based on current selection."""
+        if not hasattr(self, 'detection_details_text'):
+            return
+
+        current_row = self.detections_table.currentRow()
+        if current_row < 0 or current_row >= len(self.detections):
+            self.detection_details_text.setText("Select a detection to view full context and response guidance.")
+            return
+
+        detection = self.detections[current_row]
+        self.detection_details_text.setText(self._format_detection_details(detection))
         
     def _create_scan_results_tab(self):
         """Create dedicated scan results tab with enhanced visibility"""
@@ -2391,6 +2520,10 @@ class OrbitalStationUI(QMainWindow):
         detection_type = detection.get('type', '').lower()
         if 'shellcode' in detection_type or 'memory' in detection_type or 'injection' in detection_type:
             self._add_shellcode_detection(detection)
+
+        # Refresh details panel with newest detection context
+        if hasattr(self, 'detection_details_text') and self.detections:
+            self.detection_details_text.setText(self._format_detection_details(detection))
             
     # === FILE SCANNER METHODS ===
     
@@ -3137,11 +3270,35 @@ class OrbitalStationUI(QMainWindow):
         
     def quarantine_selected(self):
         """Quarantine selected item"""
-        self.log_output.append("Quarantine functionality not yet implemented")
-        
+        try:
+            current_tab = self.tabs.currentIndex()
+
+            # Scan Results tab
+            if hasattr(self, 'scan_results_table') and current_tab == self.tabs.indexOf(self.scan_results_table.parent()):
+                self._quarantine_selected_results()
+                return
+
+            # Filesystem tab
+            if hasattr(self, 'fs_results_table') and current_tab == self.tabs.indexOf(self.fs_results_table.parent()):
+                self._quarantine_selected_files()
+                return
+
+            # Fallback: use scan results if there is a selection there
+            if hasattr(self, 'scan_results_table') and self.scan_results_table.selectedItems():
+                self._quarantine_selected_results()
+                return
+
+            if hasattr(self, 'fs_results_table') and self.fs_results_table.selectedItems():
+                self._quarantine_selected_files()
+                return
+
+            QMessageBox.information(self, "No Selection", "Select a threat in Scan Results or Filesystem Results to quarantine.")
+        except Exception as e:
+            self.log_output.append(f"❌ Quarantine selection error: {str(e)}")
+
     def restore_selected(self):
         """Restore selected item"""
-        self.log_output.append("Restore functionality not yet implemented")
+        self._restore_quarantined()
         
     # === QUARANTINE METHODS ===
     
@@ -4033,17 +4190,16 @@ class OrbitalStationUI(QMainWindow):
                 
             self.log_output.append("🚨 Starting deep shellcode scan...")
             
-            from ShellCodeMagic import ShellcodeDetector, ShellCodeTome
-            
-            detector = ShellcodeDetector()
-            tome = ShellCodeTome()
-            
             # Clear previous results
             self.shellcode_table.setRowCount(0)
-            
+
+            # Use real enhanced memory scanner pipeline
+            from Memory import MemoryScanner
+            memory_scanner = self.memory_scanner if self.memory_scanner else MemoryScanner()
+
             # Scan all accessible processes
             import psutil
-            
+
             scanned_count = 0
             detected_count = 0
             
@@ -4060,23 +4216,24 @@ class OrbitalStationUI(QMainWindow):
                     if process_name in ['System', 'Registry', 'csrss.exe', 'smss.exe']:
                         continue
                         
-                    self.log_output.append(f"🔍 Scanning {process_name} (PID: {process_pid})...")
-                    
-                    # Simulate comprehensive memory analysis
-                    memory_analysis = tome.analyze_memory_region(b"", process_pid, process_name)
-                    
-                    if memory_analysis.get('detections'):
-                        for detection in memory_analysis['detections']:
+                    # Run actual enhanced memory scan for each process
+                    detections = memory_scanner.scan_process_memory_enhanced(process_pid)
+                    if detections:
+                        for detection in detections:
+                            detection.setdefault('process', process_name)
+                            detection.setdefault('pid', process_pid)
+                            detection.setdefault('timestamp', datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
                             self._add_shellcode_detection(detection)
+                            self._add_live_detection(detection)
                             detected_count += 1
-                    
+
                     scanned_count += 1
                     
                     # Update progress
                     if scanned_count % 10 == 0:
                         self.log_output.append(f"📊 Scanned {scanned_count} processes, found {detected_count} detections...")
                         
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                except (psutil.NoSuchProcess, psutil.AccessDenied, PermissionError):
                     continue
                     
             self.log_output.append(f"✅ Deep scan completed: {scanned_count} processes scanned, {detected_count} detections found")

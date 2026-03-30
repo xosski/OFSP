@@ -41,17 +41,32 @@ except ImportError:
     openai = None
     HAS_OPENAI = False
 
-from PyQt6.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QPushButton, QTextEdit, QLabel, QProgressBar, QTabWidget,
-    QTreeWidget, QTreeWidgetItem, QComboBox, QLineEdit, QPlainTextEdit,
-    QGroupBox, QFormLayout, QSpinBox, QCheckBox,
-    QSplitter, QStatusBar, QMenuBar, QMenu, QFileDialog,
-    QMessageBox, QListWidget, QListWidgetItem, QTableWidget,
-    QTableWidgetItem, QHeaderView, QScrollArea
-)
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
-from PyQt6.QtGui import QFont, QColor, QTextCharFormat, QSyntaxHighlighter, QTextCursor
+try:
+    QT_BACKEND = "PyQt6"
+    from PyQt6.QtWidgets import (
+        QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+        QPushButton, QTextEdit, QLabel, QProgressBar, QTabWidget,
+        QTreeWidget, QTreeWidgetItem, QComboBox, QLineEdit, QPlainTextEdit,
+        QGroupBox, QFormLayout, QSpinBox, QCheckBox,
+        QSplitter, QStatusBar, QMenuBar, QMenu, QFileDialog,
+        QMessageBox, QListWidget, QListWidgetItem, QTableWidget,
+        QTableWidgetItem, QHeaderView, QScrollArea
+    )
+    from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
+    from PyQt6.QtGui import QFont, QColor, QTextCharFormat, QSyntaxHighlighter, QTextCursor
+except Exception:
+    QT_BACKEND = "PySide6"
+    from PySide6.QtWidgets import (
+        QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+        QPushButton, QTextEdit, QLabel, QProgressBar, QTabWidget,
+        QTreeWidget, QTreeWidgetItem, QComboBox, QLineEdit, QPlainTextEdit,
+        QGroupBox, QFormLayout, QSpinBox, QCheckBox,
+        QSplitter, QStatusBar, QMenuBar, QMenu, QFileDialog,
+        QMessageBox, QListWidget, QListWidgetItem, QTableWidget,
+        QTableWidgetItem, QHeaderView, QScrollArea
+    )
+    from PySide6.QtCore import Qt, QThread, Signal as pyqtSignal, QTimer
+    from PySide6.QtGui import QFont, QColor, QTextCharFormat, QSyntaxHighlighter, QTextCursor
 
 try:
     import requests

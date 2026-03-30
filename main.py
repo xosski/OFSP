@@ -44,7 +44,7 @@ def main():
         # Try to use PySide6 UI first
         try:
             from PySide6.QtWidgets import QApplication
-            from OrbitalStationUI import OrbitalStationUI
+            from OrbitalStationUI_Complete import OrbitalStationUI
             
             logger.info("Initializing PySide6 GUI")
             app = QApplication(sys.argv)
