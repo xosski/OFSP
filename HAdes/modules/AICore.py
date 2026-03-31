@@ -23,15 +23,18 @@ import socket
 from ai_dashboard import DashboardMonitor
 from GhostMemory import GhostMemory
 import ast
-from typing import Optional
+from typing import Optional, Any, Dict
+import ipaddress
+from urllib.parse import urlparse
 
 # Import HadesAI as the main AI engine (replaces Mistral)
 try:
-    from HadesAI import HadesAI
+    from HadesAI import HadesAI, BrowserScanner
     HADES_AVAILABLE = True
     logger.info("✅ HadesAI loaded successfully")
 except ImportError as e:
     HADES_AVAILABLE = False
+    BrowserScanner = None
     logger.warning(f"⚠️ HadesAI not available: {e}")
 
 _initialized = False
@@ -106,6 +109,148 @@ ghost_memory = GhostMemory()
 
 # Thread pool for async operations
 ai_executor = ThreadPoolExecutor(max_workers=int(os.getenv("AI_MAX_WORKERS", "2")))
+
+
+# ============================================================================
+# DEFENSIVE SCANNER GUARDRAILS + AUDIT
+# ============================================================================
+
+ALLOWED_TARGETS = {
+    entry.strip().lower()
+    for entry in os.getenv("HADES_ALLOWED_TARGETS", "").split(",")
+    if entry.strip()
+}
+
+AUDIT_LOG_PATH = Path(__file__).resolve().parent / "security_audit.log"
+
+# In-memory cache scanner state (single-flight execution)
+cache_scan_state: Dict[str, Any] = {
+    "running": False,
+    "started_at": None,
+    "completed_at": None,
+    "result": None,
+    "error": None,
+}
+
+
+def audit_event(event: str, status: str, details: Dict[str, Any]) -> None:
+    payload = {
+        "ts": time.time(),
+        "event": event,
+        "status": status,
+        "details": details,
+    }
+    try:
+        with open(AUDIT_LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(json.dumps(payload, ensure_ascii=True) + "\n")
+    except Exception as e:
+        logger.warning(f"Failed to write audit log: {e}")
+
+
+def _extract_target_host(target: str) -> str:
+    target = (target or "").strip()
+    if not target:
+        return ""
+    parsed = urlparse(target if "://" in target else f"https://{target}")
+    return (parsed.hostname or target).strip().lower()
+
+
+def _is_defensive_target_allowed(target: str) -> bool:
+    host = _extract_target_host(target)
+    if not host:
+        return False
+
+    if host in {"localhost", "127.0.0.1", "::1"}:
+        return True
+
+    try:
+        ip = ipaddress.ip_address(host)
+        return ip.is_private or ip.is_loopback or ip.is_link_local
+    except ValueError:
+        pass
+
+    if host in ALLOWED_TARGETS:
+        return True
+
+    for allowed in ALLOWED_TARGETS:
+        if host.endswith(f".{allowed}"):
+            return True
+
+    return False
+
+
+def _cache_scan_status_payload() -> Dict[str, Any]:
+    result = cache_scan_state.get("result") or {}
+    findings = result.get("findings") or []
+    stats = result.get("stats") or {}
+    return {
+        "running": cache_scan_state.get("running", False),
+        "started_at": cache_scan_state.get("started_at"),
+        "completed_at": cache_scan_state.get("completed_at"),
+        "error": cache_scan_state.get("error"),
+        "summary": {
+            "findings": len(findings),
+            "total_files": int(stats.get("total_files", 0)),
+            "threats": int(stats.get("threats", 0)),
+        },
+        "result": result,
+    }
+
+
+def _run_cache_scan_sync() -> Dict[str, Any]:
+    if not hades_ai or not BrowserScanner:
+        return {"error": "HadesAI scanner unavailable"}
+
+    scanner = BrowserScanner(hades_ai.kb)
+    scanner.run()
+
+    findings = [
+        {
+            "path": f.path,
+            "threat_type": f.threat_type,
+            "severity": f.severity,
+            "browser": f.browser,
+            "pattern": f.pattern,
+        }
+        for f in scanner.findings
+    ]
+
+    return {
+        "status": "success",
+        "results_count": len(scanner.results),
+        "findings": findings,
+        "stats": dict(scanner.stats),
+    }
+
+
+async def run_cache_scan_guarded() -> Dict[str, Any]:
+    if cache_scan_state["running"]:
+        return {"status": "running", "message": "Cache scan already in progress"}
+
+    cache_scan_state["running"] = True
+    cache_scan_state["started_at"] = time.time()
+    cache_scan_state["completed_at"] = None
+    cache_scan_state["result"] = None
+    cache_scan_state["error"] = None
+    audit_event("cache_scan", "started", {"source": "api"})
+
+    try:
+        loop = asyncio.get_running_loop()
+        result = await loop.run_in_executor(ai_executor, _run_cache_scan_sync)
+        cache_scan_state["result"] = result
+        cache_scan_state["completed_at"] = time.time()
+        audit_event("cache_scan", "completed", {
+            "findings": len((result or {}).get("findings", [])),
+            "total_files": int(((result or {}).get("stats") or {}).get("total_files", 0)),
+        })
+        return result
+    except Exception as e:
+        cache_scan_state["error"] = str(e)
+        cache_scan_state["completed_at"] = time.time()
+        audit_event("cache_scan", "failed", {"error": str(e)})
+        return {"status": "error", "message": str(e)}
+    finally:
+        cache_scan_state["running"] = False
 
 
 async def ask_hades(user_message: str, module_context: dict = None) -> dict:
@@ -750,10 +895,16 @@ async def hades_scan_cache():
         return {"status": "error", "message": "HadesAI not available"}
     
     try:
-        # This would run in background - return immediately
-        return {"status": "started", "message": "Cache scan initiated"}
+        result = await run_cache_scan_guarded()
+        return {"status": "success", "scan": _cache_scan_status_payload(), "result": result}
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
+
+@app.get("/hades/scan-cache/status")
+async def hades_scan_cache_status():
+    """Get latest defensive cache scan status and summary"""
+    return {"status": "success", "scan": _cache_scan_status_payload()}
 
 @app.post("/hades/learn-url")
 async def hades_learn_url(request: Request):
@@ -820,8 +971,16 @@ async def hades_run_tool(request: Request):
     if not tool or not target:
         return {"status": "error", "message": "Tool and target required"}
     
+    if not _is_defensive_target_allowed(target):
+        audit_event("run_tool", "blocked", {"tool": tool, "target": target})
+        return {
+            "status": "error",
+            "message": "Target is not in defensive allowlist (private/loopback or HADES_ALLOWED_TARGETS)."
+        }
+
     # Execute via chat command
     result = await ask_hades(f"run {tool} on {target}")
+    audit_event("run_tool", "allowed", {"tool": tool, "target": target})
     return {"status": "success", "result": result}
 
 @app.post("/hades/execute-module")
@@ -867,6 +1026,13 @@ async def hades_full_scan(request: Request):
     if not url.startswith('http'):
         url = f"https://{url}"
     
+    if not _is_defensive_target_allowed(url):
+        audit_event("full_scan", "blocked", {"target": url})
+        return {
+            "status": "error",
+            "message": "Target is not in defensive allowlist (private/loopback or HADES_ALLOWED_TARGETS)."
+        }
+
     try:
         # Run the comprehensive scan
         loop = asyncio.get_running_loop()
@@ -874,8 +1040,10 @@ async def hades_full_scan(request: Request):
             ai_executor,
             lambda: hades_ai.full_site_scan(url)
         )
+        audit_event("full_scan", "allowed", {"target": url, "findings": len((result or {}).get("vulnerabilities", []))})
         return {"status": "success", "result": result}
     except Exception as e:
+        audit_event("full_scan", "failed", {"target": url, "error": str(e)})
         return {"status": "error", "message": str(e)}
 
 @app.post("/hades/export-pdf")
@@ -1174,7 +1342,15 @@ async def websocket_endpoint(websocket: WebSocket):
                     tool = data.get('tool')
                     target = data.get('target')
                     if hades_ai and tool and target:
+                        if not _is_defensive_target_allowed(target):
+                            audit_event("ws_run_tool", "blocked", {"tool": tool, "target": target})
+                            await websocket.send_json({
+                                "type": "error",
+                                "message": "Target blocked by defensive allowlist"
+                            })
+                            continue
                         result = await ask_hades(f"run {tool} on {target}")
+                        audit_event("ws_run_tool", "allowed", {"tool": tool, "target": target})
                         await websocket.send_json({"type": "tool_result", "data": result})
                     else:
                         await websocket.send_json({"type": "error", "message": "Tool and target required"})
@@ -1192,6 +1368,14 @@ async def websocket_endpoint(websocket: WebSocket):
                     # Trigger cache scan
                     if hades_ai:
                         await websocket.send_json({"type": "scan_started", "data": {"message": "Cache scan initiated"}})
+                        result = await run_cache_scan_guarded()
+                        await websocket.send_json({
+                            "type": "scan_result",
+                            "data": {
+                                "scan": _cache_scan_status_payload(),
+                                "result": result
+                            }
+                        })
                     else:
                         await websocket.send_json({"type": "error", "message": "HadesAI not available"})
                 
@@ -1205,14 +1389,21 @@ async def websocket_endpoint(websocket: WebSocket):
                             if not url.startswith('http'):
                                 url = f"https://{url}"
                             
+                            if not _is_defensive_target_allowed(url):
+                                audit_event("ws_full_scan", "blocked", {"target": url})
+                                await websocket.send_json({"type": "error", "message": "Target blocked by defensive allowlist"})
+                                continue
+
                             # Run scan in executor to not block
                             loop = asyncio.get_running_loop()
                             result = await loop.run_in_executor(
                                 ai_executor,
                                 lambda: hades_ai.full_site_scan(url)
                             )
+                            audit_event("ws_full_scan", "allowed", {"target": url, "findings": len((result or {}).get("vulnerabilities", []))})
                             await websocket.send_json({"type": "full_scan_result", "data": result})
                         except Exception as e:
+                            audit_event("ws_full_scan", "failed", {"target": url, "error": str(e)})
                             await websocket.send_json({"type": "error", "message": str(e)})
                     else:
                         await websocket.send_json({"type": "error", "message": "URL required for full scan"})
