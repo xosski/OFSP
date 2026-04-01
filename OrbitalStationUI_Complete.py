@@ -409,6 +409,12 @@ class FilesystemScanWorker(QThread):
                         'yara_match': match  # Include the full match object for additional processing
                     }
             
+            # Browser deep-clean mode adds browser-specific inspection
+            if self.scan_type == 'browser':
+                browser_result = self._browser_artifact_analysis(file_path)
+                if browser_result:
+                    return browser_result
+
             # Additional heuristic checks if enabled
             if self.parent_ui.heuristic_analysis.isChecked():
                 heuristic_result = self._heuristic_analysis(file_path)
@@ -420,6 +426,63 @@ class FilesystemScanWorker(QThread):
             pass
         
         return None
+
+    def _browser_artifact_analysis(self, file_path):
+        """Analyze browser artifacts for suspicious extension/cache behavior."""
+        lower_path = file_path.lower()
+        browser_tokens = ['chrome', 'edge', 'firefox', 'brave', 'opera']
+        if not any(token in lower_path for token in browser_tokens):
+            return None
+
+        filename = os.path.basename(lower_path)
+        ext = os.path.splitext(lower_path)[1]
+
+        # Executables should not normally live under browser profile/cache paths.
+        if ext in {'.exe', '.dll', '.bat', '.cmd', '.ps1', '.vbs', '.scr'}:
+            return {
+                'name': 'Browser Profile Executable Artifact',
+                'path': file_path,
+                'type': 'Browser Deep Clean',
+                'severity': 'High',
+                'action': 'Detected',
+                'details': 'Executable/script artifact found inside browser profile or cache path'
+            }
+
+        inspectable = ext in {'.js', '.mjs', '.json', '.html', '.htm', '.txt'} or filename in {'manifest.json', 'preferences'}
+        if not inspectable:
+            return None
+
+        try:
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                content = f.read(262144).lower()
+        except Exception:
+            return None
+
+        suspicious_markers = [
+            'eval(',
+            'new function(',
+            'atob(',
+            'fromcharcode(',
+            'document.cookie',
+            'chrome.cookies',
+            'webrequestblocking',
+            'nativemessaging',
+            'proxy',
+            'debugger'
+        ]
+        hits = [marker for marker in suspicious_markers if marker in content]
+        if not hits:
+            return None
+
+        severity = 'High' if len(hits) >= 3 else 'Medium'
+        return {
+            'name': 'Suspicious Browser Script/Extension Artifact',
+            'path': file_path,
+            'type': 'Browser Deep Clean',
+            'severity': severity,
+            'action': 'Detected',
+            'details': f"Suspicious browser markers: {', '.join(hits[:5])}"
+        }
     
     def _heuristic_analysis(self, file_path):
         """Perform heuristic analysis on a file"""
@@ -662,6 +725,14 @@ class OrbitalStationUI(QMainWindow):
             return None
 
         return file_path
+
+    def _is_scan_results_tab_active(self):
+        """Return True when the dedicated Scan Results tab is active."""
+        return hasattr(self, 'scan_results_tab') and self.tabs.currentWidget() is self.scan_results_tab
+
+    def _is_filesystem_tab_active(self):
+        """Return True when the System Scanner tab is active."""
+        return hasattr(self, 'filesystem_tab') and self.tabs.currentWidget() is self.filesystem_tab
 
     def _is_system_file_protected(self, file_path):
         """Safely check whether a file is protected by policy."""
@@ -1395,6 +1466,7 @@ class OrbitalStationUI(QMainWindow):
     def _create_filesystem_tab(self):
         """Create comprehensive filesystem scanner tab like commercial antivirus"""
         widget = QWidget()
+        self.filesystem_tab = widget
         layout = QVBoxLayout(widget)
         
         # === SCAN CONFIGURATION ===
@@ -1511,7 +1583,11 @@ class OrbitalStationUI(QMainWindow):
         self.heuristic_analysis.setCheckable(True)
         self.heuristic_analysis.setChecked(True)
         
-        for btn in [self.deep_scan_archives, self.scan_network_drives, self.heuristic_analysis]:
+        self.scan_browser_artifacts = QPushButton("Scan Browser Artifacts")
+        self.scan_browser_artifacts.setCheckable(True)
+        self.scan_browser_artifacts.setChecked(True)
+
+        for btn in [self.deep_scan_archives, self.scan_network_drives, self.heuristic_analysis, self.scan_browser_artifacts]:
             btn.setStyleSheet("""
                 QPushButton {
                     text-align: left;
@@ -1530,6 +1606,7 @@ class OrbitalStationUI(QMainWindow):
         advanced_layout.addWidget(self.deep_scan_archives)
         advanced_layout.addWidget(self.scan_network_drives)
         advanced_layout.addWidget(self.heuristic_analysis)
+        advanced_layout.addWidget(self.scan_browser_artifacts)
         advanced_layout.addStretch()
         options_layout.addLayout(advanced_layout)
         
@@ -1590,6 +1667,23 @@ class OrbitalStationUI(QMainWindow):
             }
         """)
         self.fs_custom_scan_btn.clicked.connect(self._start_filesystem_custom_scan)
+
+        self.fs_browser_scan_btn = QPushButton("Browser Deep Clean Scan")
+        self.fs_browser_scan_btn.setStyleSheet("""
+            QPushButton {
+                background: #5a3f99;
+                color: white;
+                border: none;
+                padding: 12px 24px;
+                border-radius: 6px;
+                font-weight: bold;
+                font-size: 14px;
+            }
+            QPushButton:hover {
+                background: #4b3380;
+            }
+        """)
+        self.fs_browser_scan_btn.clicked.connect(self._start_browser_deep_clean_scan)
         
         self.fs_stop_scan_btn = QPushButton("⏹️ Stop Scan")
         self.fs_stop_scan_btn.setStyleSheet("""
@@ -1612,6 +1706,7 @@ class OrbitalStationUI(QMainWindow):
         controls_layout.addWidget(self.fs_quick_scan_btn)
         controls_layout.addWidget(self.fs_full_scan_btn)
         controls_layout.addWidget(self.fs_custom_scan_btn)
+        controls_layout.addWidget(self.fs_browser_scan_btn)
         controls_layout.addWidget(self.fs_stop_scan_btn)
         controls_layout.addStretch()
         layout.addWidget(controls_group)
@@ -2188,6 +2283,7 @@ class OrbitalStationUI(QMainWindow):
     def _create_scan_results_tab(self):
         """Create dedicated scan results tab with enhanced visibility"""
         widget = QWidget()
+        self.scan_results_tab = widget
         layout = QVBoxLayout(widget)
         
         # Results summary frame
@@ -2371,6 +2467,7 @@ class OrbitalStationUI(QMainWindow):
     def _create_scan_status_tab(self):
         """Create scan status and live detection monitoring tab"""
         widget = QWidget()
+        self.live_scans_tab = widget
         layout = QVBoxLayout(widget)
         
         # Scan controls frame
@@ -2400,7 +2497,7 @@ class OrbitalStationUI(QMainWindow):
         buttons_layout.addWidget(self.start_deep_scan_btn)
         
         self.clear_detections_btn = QPushButton("🧹 Clear")
-        self.clear_detections_btn.clicked.connect(self._clear_scan_results)
+        self.clear_detections_btn.clicked.connect(self._clear_live_scan_results)
         buttons_layout.addWidget(self.clear_detections_btn)
         
         controls_layout.addLayout(buttons_layout)
@@ -2435,8 +2532,8 @@ class OrbitalStationUI(QMainWindow):
         
         self.tabs.addTab(widget, "📊 Live Scans")
         
-    def _clear_scan_results(self):
-        """Clear scan results and status"""
+    def _clear_live_scan_results(self):
+        """Clear live scan results and status text."""
         self.live_detections_table.setRowCount(0)
         self.scan_status_text.clear()
         self.scan_status_text.append("💤 Results cleared")
@@ -2463,7 +2560,13 @@ class OrbitalStationUI(QMainWindow):
             details = f"🔍 Detection Details:\n\n"
             details += f"Type: {detection.get('type', 'Unknown')}\n"
             details += f"Process: {detection.get('process', 'Unknown')}\n"
-            details += f"Address: 0x{detection.get('address', 0):08x}\n"
+            address = detection.get('address', 'N/A')
+            if isinstance(address, int):
+                address_text = f"0x{address:08x}"
+            else:
+                address_text = str(address)
+
+            details += f"Address: {address_text}\n"
             details += f"Size: {detection.get('size', 0)} bytes\n"
             details += f"Confidence: {detection.get('confidence', 'Unknown')}\n"
             details += f"Risk Level: {detection.get('risk', 'Unknown')}\n"
@@ -3050,7 +3153,41 @@ class OrbitalStationUI(QMainWindow):
             "C:\\Windows\\Temp\\"
         ]
         
+        if self.scan_browser_artifacts.isChecked():
+            scan_paths.extend(self._get_browser_scan_paths())
+
         self._start_filesystem_scan("quick", scan_paths)
+
+    def _get_browser_scan_paths(self):
+        """Return known browser profile/cache locations on Windows."""
+        local = os.environ.get('LOCALAPPDATA', '')
+        roaming = os.environ.get('APPDATA', '')
+
+        candidates = [
+            os.path.join(local, 'Google', 'Chrome', 'User Data'),
+            os.path.join(local, 'Microsoft', 'Edge', 'User Data'),
+            os.path.join(local, 'BraveSoftware', 'Brave-Browser', 'User Data'),
+            os.path.join(roaming, 'Mozilla', 'Firefox', 'Profiles'),
+            os.path.join(roaming, 'Opera Software')
+        ]
+
+        unique_paths = []
+        for path in candidates:
+            if path and os.path.isdir(path) and path not in unique_paths:
+                unique_paths.append(path)
+        return unique_paths
+
+    def _start_browser_deep_clean_scan(self):
+        """Start focused browser profile/cache/extension scan."""
+        if self.fs_scanning:
+            return
+
+        browser_paths = self._get_browser_scan_paths()
+        if not browser_paths:
+            QMessageBox.information(self, "Browser Scan", "No browser profile paths were found on this host.")
+            return
+
+        self._start_filesystem_scan("browser", browser_paths)
     
     def _start_filesystem_full_scan(self):
         """Start a full system scan of all selected drives"""
@@ -3097,6 +3234,7 @@ class OrbitalStationUI(QMainWindow):
         self.fs_quick_scan_btn.setEnabled(False)
         self.fs_full_scan_btn.setEnabled(False)
         self.fs_custom_scan_btn.setEnabled(False)
+        self.fs_browser_scan_btn.setEnabled(False)
         self.fs_stop_scan_btn.setEnabled(True)
         
         self.fs_current_file_label.setText("Initializing scan...")
@@ -3191,6 +3329,7 @@ class OrbitalStationUI(QMainWindow):
         self.fs_quick_scan_btn.setEnabled(True)
         self.fs_full_scan_btn.setEnabled(True)
         self.fs_custom_scan_btn.setEnabled(True)
+        self.fs_browser_scan_btn.setEnabled(True)
         self.fs_stop_scan_btn.setEnabled(False)
         
         self.fs_current_file_label.setText(f"Scan completed! {self.fs_files_scanned} files scanned, {self.fs_threats_found} threats found.")
@@ -3449,15 +3588,11 @@ class OrbitalStationUI(QMainWindow):
     def quarantine_selected(self):
         """Quarantine selected item"""
         try:
-            current_tab = self.tabs.currentIndex()
-
-            # Scan Results tab
-            if hasattr(self, 'scan_results_table') and current_tab == self.tabs.indexOf(self.scan_results_table.parent()):
+            if hasattr(self, 'scan_results_table') and self._is_scan_results_tab_active():
                 self._quarantine_selected_results()
                 return
 
-            # Filesystem tab
-            if hasattr(self, 'fs_results_table') and current_tab == self.tabs.indexOf(self.fs_results_table.parent()):
+            if hasattr(self, 'fs_results_table') and self._is_filesystem_tab_active():
                 self._quarantine_selected_files()
                 return
 
@@ -3790,11 +3925,17 @@ class OrbitalStationUI(QMainWindow):
         current_row = self.scan_results_table.currentRow()
         if current_row >= 0:
             # Get threat details from the selected row
-            name = self.scan_results_table.item(current_row, 0).text()
-            path = self.scan_results_table.item(current_row, 1).text()
-            threat_type = self.scan_results_table.item(current_row, 2).text()
-            severity = self.scan_results_table.item(current_row, 3).text()
-            details = self.scan_results_table.item(current_row, 5).text()
+            name_item = self.scan_results_table.item(current_row, 0)
+            path_item = self.scan_results_table.item(current_row, 1)
+            type_item = self.scan_results_table.item(current_row, 2)
+            severity_item = self.scan_results_table.item(current_row, 3)
+            details_item = self.scan_results_table.item(current_row, 5)
+
+            name = name_item.text() if name_item else "Unknown"
+            path = path_item.text() if path_item else "Unknown"
+            threat_type = type_item.text() if type_item else "Unknown"
+            severity = severity_item.text() if severity_item else "Unknown"
+            details = details_item.text() if details_item else ""
             
             # Format detailed information
             detail_text = f"""Threat Name: {name}
@@ -4045,9 +4186,7 @@ class OrbitalStationUI(QMainWindow):
     def remove_infected_file(self):
         """Remove infected file from filesystem"""
         try:
-            current_tab = self.tabs.currentIndex()
-            
-            if current_tab == 1:  # Scan Results tab
+            if self._is_scan_results_tab_active():
                 current_row = self.scan_results_table.currentRow()
                 if current_row < 0:
                     QMessageBox.warning(self, "No Selection", "Please select a detection to remove the file.")
@@ -4080,14 +4219,13 @@ class OrbitalStationUI(QMainWindow):
                     except Exception as e:
                         self.log_output.append(f"❌ Error removing file {file_path}: {str(e)}")
                         QMessageBox.critical(self, "Error", f"Failed to remove file: {str(e)}")
-            else:
-                # Check main detections table
-                current_row = self.results_table.currentRow()
+            elif self._is_filesystem_tab_active():
+                current_row = self.fs_results_table.currentRow()
                 if current_row < 0:
                     QMessageBox.warning(self, "No Selection", "Please select a detection to remove the file.")
                     return
-                    
-                path_item = self.results_table.item(current_row, 2)  # Path column
+
+                path_item = self.fs_results_table.item(current_row, 1)  # Path column
                 if not path_item:
                     return
                     
@@ -4104,7 +4242,7 @@ class OrbitalStationUI(QMainWindow):
                             os.remove(file_path)
                             self.log_output.append(f"🗑️ Successfully removed infected file: {file_path}")
                             # Remove from table
-                            self.results_table.removeRow(current_row)
+                            self.fs_results_table.removeRow(current_row)
                         else:
                             self.log_output.append(f"⚠️ File not found: {file_path}")
                     except PermissionError:
@@ -4115,6 +4253,13 @@ class OrbitalStationUI(QMainWindow):
                         self.log_output.append(f"❌ Error removing file {file_path}: {str(e)}")
                         QMessageBox.critical(self, "Error", f"Failed to remove file: {str(e)}")
                         
+            elif self.scan_results_table.selectedItems():
+                self._delete_selected_results()
+            elif self.fs_results_table.selectedItems():
+                self._delete_selected_files()
+            else:
+                QMessageBox.warning(self, "No Selection", "Select a threat in Scan Results or System Scanner to remove.")
+
         except Exception as e:
             self.log_output.append(f"❌ Remove file error: {str(e)}")
             QMessageBox.critical(self, "Error", f"Remove file operation failed: {str(e)}")
@@ -4189,9 +4334,7 @@ class OrbitalStationUI(QMainWindow):
     def quarantine_file(self):
         """Quarantine selected file"""
         try:
-            current_tab = self.tabs.currentIndex()
-            
-            if current_tab == 1:  # Scan Results tab
+            if self._is_scan_results_tab_active():
                 current_row = self.scan_results_table.currentRow()
                 if current_row < 0:
                     QMessageBox.warning(self, "No Selection", "Please select a detection to quarantine the file.")
@@ -4213,14 +4356,13 @@ class OrbitalStationUI(QMainWindow):
                         # Update status in table
                         self.scan_results_table.setItem(current_row, 6, QTableWidgetItem("Quarantined"))
                         self.scan_results_table.item(current_row, 6).setBackground(QColor('#ffcc00'))
-            else:
-                # Check main detections table
-                current_row = self.results_table.currentRow()
+            elif self._is_filesystem_tab_active():
+                current_row = self.fs_results_table.currentRow()
                 if current_row < 0:
                     QMessageBox.warning(self, "No Selection", "Please select a detection to quarantine the file.")
                     return
-                    
-                path_item = self.results_table.item(current_row, 2)  # Path column
+
+                path_item = self.fs_results_table.item(current_row, 1)  # Path column
                 if not path_item:
                     return
                     
@@ -4234,9 +4376,14 @@ class OrbitalStationUI(QMainWindow):
                 if reply == QMessageBox.Yes:
                     if self._quarantine_file(file_path):
                         # Update status in table
-                        status_item = QTableWidgetItem("Quarantined")
-                        status_item.setBackground(QColor('#ffcc00'))
-                        self.results_table.setItem(current_row, 5, status_item)
+                        self.fs_results_table.setItem(current_row, 4, QTableWidgetItem("Quarantined"))
+                        self.fs_results_table.item(current_row, 4).setBackground(QColor('#ffcc00'))
+            elif self.scan_results_table.selectedItems():
+                self._quarantine_selected_results()
+            elif self.fs_results_table.selectedItems():
+                self._quarantine_selected_files()
+            else:
+                QMessageBox.warning(self, "No Selection", "Select a threat in Scan Results or System Scanner to quarantine.")
                         
         except Exception as e:
             self.log_output.append(f"❌ Quarantine file error: {str(e)}")

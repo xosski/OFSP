@@ -32,6 +32,8 @@ shared_constants.py	Windows API constants and ctypes-based memory structures
 🛡 Features
 ⚙️ Quick & Deep Scans (Process, Memory, Filesystem)
 
+🌐 Browser Deep Clean Scan (Chrome, Edge, Firefox, Brave, Opera profiles/cache)
+
 🧠 YARA Rule Compilation & Whitelist Handling
 
 ⚡ Real-Time Detection Alerts & Event Logging
@@ -41,6 +43,25 @@ shared_constants.py	Windows API constants and ctypes-based memory structures
 🧬 Shellcode Detection via Pattern Matching
 
 🔧 Admin Check & Privilege Escalation Alerts
+
+🧹 Browser artifact heuristics for suspicious extensions/scripts and executable dropper files in browser profile paths
+
+### Browser Deep Clean In Orbital Station UI
+Use this when you want to verify browser environments are clean after suspicious activity.
+
+1. Launch `python OrbitalStationUI_Complete.py`.
+2. Open the `🖥️ System Scanner` tab.
+3. In `Scan Controls`, click `Browser Deep Clean Scan` for a focused browser pass.
+4. In `Scan Options`, keep `Scan Browser Artifacts` enabled to include browser profile/cache paths during quick scans.
+5. Review findings in `🦠 Scan Results` and the `📊 Scan Results` tab, then quarantine/delete as needed.
+
+Browser coverage includes:
+
+1. Chrome (`%LOCALAPPDATA%\\Google\\Chrome\\User Data`)
+2. Edge (`%LOCALAPPDATA%\\Microsoft\\Edge\\User Data`)
+3. Brave (`%LOCALAPPDATA%\\BraveSoftware\\Brave-Browser\\User Data`)
+4. Firefox (`%APPDATA%\\Mozilla\\Firefox\\Profiles`)
+5. Opera (`%APPDATA%\\Opera Software`)
 
 🚀 Getting Started
 1. Requirements
