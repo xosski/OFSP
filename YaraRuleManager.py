@@ -13,6 +13,16 @@ import re
 import glob
 from datetime import datetime
 
+
+def _safe_print(message):
+    """Print defensively on Windows consoles with limited encodings."""
+    try:
+        print(message)
+    except UnicodeEncodeError:
+        # Fall back to an ASCII-safe rendering when console encoding cannot represent symbols.
+        fallback = str(message).encode('ascii', errors='replace').decode('ascii')
+        print(fallback)
+
 class YaraRuleManager:
     _instance = None
     _initialized = False
@@ -607,20 +617,20 @@ class YaraRuleManager:
                     logging.error(f"Error creating default rule in {category}: {str(e)}")
     def create_repo_directories(self):
         """Explicitly create all repository directories with verbose logging"""
-        print("=== Creating Repository Directories ===")
+        _safe_print("=== Creating Repository Directories ===")
         self.rules_dir = getattr(self, 'rules_dir', Path('yara_rules'))
         # Make sure we're using a Path object
         if isinstance(self.rules_dir, str):
             self.rules_dir = Path(self.rules_dir)
         
-        print(f"Base rules directory: {self.rules_dir}")
+        _safe_print(f"Base rules directory: {self.rules_dir}")
         
         # Create base directory
         try:
             os.makedirs(self.rules_dir, exist_ok=True)
-            print(f"✓ Created base directory: {self.rules_dir}")
+            _safe_print(f"✓ Created base directory: {self.rules_dir}")
         except Exception as e:
-            print(f"✗ Error creating base directory: {str(e)}")
+            _safe_print(f"✗ Error creating base directory: {str(e)}")
         
         # Define repository sources if not already defined
         if not hasattr(self, 'repo_sources') or not self.repo_sources:
@@ -637,26 +647,26 @@ class YaraRuleManager:
             category_dir = self.rules_dir / category
             try:
                 os.makedirs(category_dir, exist_ok=True)
-                print(f"✓ Created category directory: {category_dir}")
+                _safe_print(f"✓ Created category directory: {category_dir}")
             except Exception as e:
-                print(f"✗ Error creating category directory {category}: {str(e)}")
+                _safe_print(f"✗ Error creating category directory {category}: {str(e)}")
         
         # Create repository directories
         for repo_name, self.repo_url in self.repo_sources.items():
             repo_dir = self.rules_dir / repo_name
             try:
                 os.makedirs(repo_dir, exist_ok=True)
-                print(f"✓ Created repository directory: {repo_dir}")
+                _safe_print(f"✓ Created repository directory: {repo_dir}")
                 
                 # Verify the directory exists
                 if repo_dir.exists():
-                    print(f"  ✓ Verified directory exists: {repo_dir}")
+                    _safe_print(f"  ✓ Verified directory exists: {repo_dir}")
                 else:
-                    print(f"  ✗ Directory creation failed, path doesn't exist: {repo_dir}")
+                    _safe_print(f"  ✗ Directory creation failed, path doesn't exist: {repo_dir}")
             except Exception as e:
-                print(f"✗ Error creating repository directory {repo_name}: {str(e)}")
+                _safe_print(f"✗ Error creating repository directory {repo_name}: {str(e)}")
         
-        print("=== Repository Directory Creation Complete ===")
+        _safe_print("=== Repository Directory Creation Complete ===")
         return True
     def create_basic_rules(self):
         """Create basic, guaranteed-to-compile YARA rules in all category directories"""

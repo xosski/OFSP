@@ -89,14 +89,13 @@ class MemoryScanner:
             logging.info("MemoryScanner")
         
         # Use shared YARA manager if available, otherwise create one
+        self.yara_manager = None
         if MemoryScanner.shared_yara_manager:
             self.yara_manager = MemoryScanner.shared_yara_manager
             logging.info("Using shared YaraRuleManager instance")
-        elif YaraRuleManager and not hasattr(self, 'yara_manager'):
+        elif YaraRuleManager and getattr(self, 'yara_manager', None) is None:
             self.yara_manager = YaraRuleManager()
             logging.info("Created new YaraRuleManager instance")
-        else:
-            self.yara_manager = None
             
         self._initialized = True
         self.executable_found = False
@@ -117,13 +116,17 @@ class MemoryScanner:
         logging.info("MemoryScanner")
         if not self.yara_manager:
             logging.debug("Initializing YaraRuleManager")
-        try:
-            # Call compile_combined_rules() directly on yara_manager, not through another attribute
-            self.combined_rules = self.yara_manager.compile_combined_rules()
-        except Exception as e:
-            self.logger.error(f"Error loading YARA rules: {str(e)}")
-            print(f"Error loading YARA rules: {str(e)}")
+        if self.yara_manager and hasattr(self.yara_manager, 'compile_combined_rules'):
+            try:
+                # Compile YARA rules only when a manager instance is available.
+                self.combined_rules = self.yara_manager.compile_combined_rules()
+            except Exception as e:
+                self.logger.error(f"Error loading YARA rules: {str(e)}")
+                print(f"Error loading YARA rules: {str(e)}")
+                self.combined_rules = None
+        else:
             self.combined_rules = None
+            self.logger.warning("YARA manager unavailable during MemoryScanner initialization")
         self.memory_info_dict = {
             "BaseAddress": 0,
             "AllocationBase": 0,

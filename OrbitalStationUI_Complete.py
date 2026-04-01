@@ -6,6 +6,8 @@ process monitoring, YARA rule management, and protection features.
 
 import sys
 import os
+import ctypes
+import logging
 import traceback
 import threading
 import time
@@ -527,6 +529,23 @@ class FilesystemScanWorker(QThread):
         
         return None
 
+
+class BackendInitWorker(QThread):
+    """Background worker that performs heavy backend initialization."""
+    completed = Signal(object)
+    failed = Signal(str)
+
+    def __init__(self, initializer):
+        super().__init__()
+        self._initializer = initializer
+
+    def run(self):
+        try:
+            state = self._initializer()
+            self.completed.emit(state)
+        except Exception as e:
+            self.failed.emit(str(e))
+
 class OrbitalStationUI(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -555,6 +574,8 @@ class OrbitalStationUI(QMainWindow):
         self.code_disassembler = None
         self.threat_quarantine = None
         self.malware_scanner = None
+        self.backend_init_worker = None
+        self.backend_ready = False
         
         # Setup styling and create UI FIRST (so user sees something)
         self._setup_styling()
@@ -564,11 +585,8 @@ class OrbitalStationUI(QMainWindow):
         self.show()
         QApplication.processEvents()
         
-        # Now initialize backend components (with progress feedback)
-        self._init_backend()
-        
-        # Initialize protection systems
-        self.initial_protection()
+        # Initialize backend asynchronously to avoid freezing UI on startup.
+        self._start_backend_initialization()
         
     def _init_backend(self):
         """Initialize all backend components"""
@@ -682,6 +700,162 @@ class OrbitalStationUI(QMainWindow):
             'winlogon.exe', 'csrss.exe', 'services.exe',
             'smss.exe', 'wininit.exe', 'System'
         }
+
+    def _collect_backend_state(self):
+        """Build backend components in worker thread and return state payload."""
+        state = {
+            'memory_scanner': None,
+            'yara_manager': None,
+            'rules_loaded': False,
+            'compiled_rules': None,
+            'shellcode_detector': None,
+            'shellcode_tome': None,
+            'code_disassembler': None,
+            'threat_quarantine': None,
+            'malware_scanner': None,
+            'hades_kb': None,
+            'hades_chat': None,
+            'hades_network_monitor': None,
+            'hades_cache_scanner': None,
+            'critical_processes': {
+                'explorer.exe', 'svchost.exe', 'lsass.exe',
+                'winlogon.exe', 'csrss.exe', 'services.exe',
+                'smss.exe', 'wininit.exe', 'System'
+            }
+        }
+
+        if Memory:
+            try:
+                state['memory_scanner'] = Memory.MemoryScanner()
+            except Exception:
+                state['memory_scanner'] = None
+
+        if YaraRuleManager:
+            try:
+                if state['memory_scanner'] and hasattr(state['memory_scanner'], 'shared_yara_manager') and state['memory_scanner'].shared_yara_manager:
+                    state['yara_manager'] = state['memory_scanner'].shared_yara_manager
+                else:
+                    state['yara_manager'] = YaraRuleManager.YaraRuleManager()
+
+                if state['yara_manager']:
+                    if not hasattr(state['yara_manager'], 'rules_dir'):
+                        state['yara_manager'].rules_dir = Path("yara_rules")
+                        os.makedirs(state['yara_manager'].rules_dir, exist_ok=True)
+
+                    state['yara_manager'].create_repo_directories()
+                    state['yara_manager'].fetch_all_rules()
+                    state['yara_manager'].create_missing_rules()
+                    state['compiled_rules'] = state['yara_manager'].compile_combined_rules()
+                    state['rules_loaded'] = state['compiled_rules'] is not None
+
+                    if Memory and hasattr(Memory, 'MemoryScanner'):
+                        try:
+                            Memory.MemoryScanner.shared_yara_manager = state['yara_manager']
+                        except Exception:
+                            pass
+
+                    if ShellCodeMagic and hasattr(ShellCodeMagic, 'ShellcodeDetector'):
+                        try:
+                            ShellCodeMagic.ShellcodeDetector.shared_yara_manager = state['yara_manager']
+                        except Exception:
+                            pass
+            except Exception:
+                state['yara_manager'] = None
+                state['rules_loaded'] = False
+
+        if ShellCodeMagic:
+            try:
+                from ShellCodeMagic import ShellcodeDetector, ShellCodeTome, CodeDisassembler, ThreatQuarantine
+                state['shellcode_detector'] = ShellcodeDetector()
+                state['shellcode_tome'] = ShellCodeTome()
+                state['code_disassembler'] = CodeDisassembler()
+                state['threat_quarantine'] = ThreatQuarantine()
+            except Exception:
+                pass
+
+        if weapons:
+            try:
+                state['malware_scanner'] = weapons.MalwareScanner()
+            except Exception:
+                state['malware_scanner'] = None
+
+        if HadesAI:
+            try:
+                state['hades_kb'] = HadesAI.KnowledgeBase()
+                state['hades_chat'] = HadesAI.ChatProcessor(state['hades_kb'])
+            except Exception:
+                pass
+
+        return state
+
+    def _start_backend_initialization(self):
+        """Run backend initialization in a worker thread to keep UI responsive."""
+        self.status_label.setText("Initializing Backend...")
+        self.rules_label.setText("Rules: Loading...")
+        self.status_message.setText("Loading detection engines in background")
+
+        self.backend_init_worker = BackendInitWorker(self._collect_backend_state)
+        self.backend_init_worker.completed.connect(self._on_backend_initialized)
+        self.backend_init_worker.failed.connect(self._on_backend_init_failed)
+        self.backend_init_worker.start()
+
+    def _on_backend_initialized(self, state):
+        """Apply initialized backend state on the UI thread."""
+        self.memory_scanner = state.get('memory_scanner')
+        self.yara_manager = state.get('yara_manager')
+        self.rules_loaded = state.get('rules_loaded', False)
+        self.compiled_rules = state.get('compiled_rules')
+        self.shellcode_detector = state.get('shellcode_detector')
+        self.shellcode_tome = state.get('shellcode_tome')
+        self.code_disassembler = state.get('code_disassembler')
+        self.threat_quarantine = state.get('threat_quarantine')
+        self.malware_scanner = state.get('malware_scanner')
+        self.hades_kb = state.get('hades_kb')
+        self.hades_chat = state.get('hades_chat')
+        self.hades_network_monitor = state.get('hades_network_monitor')
+        self.hades_cache_scanner = state.get('hades_cache_scanner')
+        self.critical_processes = state.get('critical_processes', set())
+
+        self.quarantine_dir = Path("quarantine")
+        self.quarantine_dir.mkdir(exist_ok=True)
+
+        self.backend_ready = True
+        self.status_message.setText("Backend initialized")
+        self.initial_protection()
+        self.backend_init_worker = None
+
+    def _on_backend_init_failed(self, error_message):
+        """Handle backend initialization failure without freezing the UI."""
+        self.backend_ready = False
+        self.status_label.setText("Limited Protection")
+        self.status_label.setStyleSheet("color: #ffcc00; font-weight: bold; font-size: 14px;")
+        self.rules_label.setText("Rules: Failed")
+        self.status_message.setText("Backend init failed")
+        if hasattr(self, 'log_output'):
+            self.log_output.append(f"Backend initialization failed: {error_message}")
+        self.backend_init_worker = None
+
+    def closeEvent(self, event):
+        """Ensure background workers are stopped before window closes."""
+        try:
+            if self.scan_worker and self.scan_worker.isRunning():
+                self.scan_worker.stop()
+                self.scan_worker.wait(3000)
+        except Exception:
+            pass
+
+        try:
+            if self.backend_init_worker and self.backend_init_worker.isRunning():
+                self.backend_init_worker.requestInterruption()
+                self.backend_init_worker.quit()
+                if not self.backend_init_worker.wait(5000):
+                    # Last-resort shutdown path to avoid orphaned running thread on app exit.
+                    self.backend_init_worker.terminate()
+                    self.backend_init_worker.wait(2000)
+        except Exception:
+            pass
+
+        super().closeEvent(event)
 
     def _severity_score(self, severity):
         mapping = {'low': 1, 'medium': 2, 'high': 3, 'critical': 4}
@@ -1420,10 +1594,14 @@ class OrbitalStationUI(QMainWindow):
         self.disable_protection_btn.clicked.connect(self.disable_protection)
         self.quarantine_btn.clicked.connect(self.quarantine_selected)
         self.restore_btn.clicked.connect(self.restore_selected)
+
+        self.delete_btn = QPushButton("Delete Selected")
+        self.delete_btn.clicked.connect(self.delete_selected)
         
         protection_layout.addWidget(self.enable_protection_btn)
         protection_layout.addWidget(self.disable_protection_btn)
         protection_layout.addWidget(self.quarantine_btn)
+        protection_layout.addWidget(self.delete_btn)
         protection_layout.addWidget(self.restore_btn)
         
         control_layout.addWidget(scan_group)
@@ -2148,18 +2326,29 @@ class OrbitalStationUI(QMainWindow):
     def _create_detections_tab(self):
         """Create detections/alerts tab"""
         widget = QWidget()
+        self.detections_tab = widget
         layout = QVBoxLayout(widget)
-        
+
         # Detection controls
         control_frame = QGroupBox("Detection Management")
         control_layout = QHBoxLayout(control_frame)
-        
+
+        self.detections_quarantine_btn = QPushButton("Quarantine Selected")
+        self.detections_quarantine_btn.setEnabled(False)
+        self.detections_quarantine_btn.clicked.connect(self._quarantine_selected_detections)
+
+        self.detections_delete_btn = QPushButton("Delete Selected")
+        self.detections_delete_btn.setEnabled(False)
+        self.detections_delete_btn.clicked.connect(self._delete_selected_detections)
+
         clear_btn = QPushButton("Clear All")
         clear_btn.clicked.connect(self._clear_detections)
-        
+
         export_btn = QPushButton("Export Detections")
         export_btn.clicked.connect(self._export_detections)
-        
+
+        control_layout.addWidget(self.detections_quarantine_btn)
+        control_layout.addWidget(self.detections_delete_btn)
         control_layout.addWidget(clear_btn)
         control_layout.addWidget(export_btn)
         control_layout.addStretch()
@@ -2172,6 +2361,7 @@ class OrbitalStationUI(QMainWindow):
         self.detections_table.setHorizontalHeaderLabels(["Timestamp", "Type", "Name", "PID", "Severity", "Description"])
         self.detections_table.horizontalHeader().setStretchLastSection(True)
         self.detections_table.setAlternatingRowColors(True)
+        self.detections_table.setSelectionBehavior(QTableWidget.SelectRows)
         layout.addWidget(self.detections_table)
         
         # Detection detail pane
@@ -2185,8 +2375,30 @@ class OrbitalStationUI(QMainWindow):
         layout.addWidget(detail_frame)
 
         self.detections_table.itemSelectionChanged.connect(self._update_detection_details)
+        self.detections_table.itemSelectionChanged.connect(self._update_detection_action_buttons)
 
         self.tabs.addTab(widget, "Detections")
+
+    def _update_detection_action_buttons(self):
+        """Enable detection action buttons only when selected rows have valid file paths."""
+        if not hasattr(self, 'detections_table'):
+            return
+
+        has_actionable_selection = False
+        selected_rows = sorted({item.row() for item in self.detections_table.selectedItems()})
+        for row in selected_rows:
+            if row < 0 or row >= len(self.detections):
+                continue
+            detection = self.detections[row]
+            file_path = str(detection.get('path', '')).strip()
+            if file_path and file_path.lower() not in ('n/a', 'na') and os.path.exists(file_path):
+                has_actionable_selection = True
+                break
+
+        if hasattr(self, 'detections_quarantine_btn'):
+            self.detections_quarantine_btn.setEnabled(has_actionable_selection)
+        if hasattr(self, 'detections_delete_btn'):
+            self.detections_delete_btn.setEnabled(has_actionable_selection)
 
     def _get_detection_recommendation(self, detection):
         """Return a practical recommendation based on detection context."""
@@ -2279,6 +2491,79 @@ class OrbitalStationUI(QMainWindow):
 
         detection = self.detections[current_row]
         self.detection_details_text.setText(self._format_detection_details(detection))
+
+    def _quarantine_selected_detections(self):
+        """Quarantine file-backed detections directly from the detections tab."""
+        selected_rows = sorted({item.row() for item in self.detections_table.selectedItems()})
+        if not selected_rows:
+            QMessageBox.warning(self, "No Selection", "Please select detections to quarantine.")
+            return
+
+        quarantined = 0
+        skipped = 0
+        for row in selected_rows:
+            if row < 0 or row >= len(self.detections):
+                continue
+
+            detection = self.detections[row]
+            file_path = str(detection.get('path', '')).strip()
+            if not file_path or file_path.lower() in ('n/a', 'na') or not os.path.exists(file_path):
+                skipped += 1
+                continue
+
+            if self._is_system_file_protected(file_path):
+                skipped += 1
+                continue
+
+            if self._quarantine_file(file_path):
+                detection['status'] = 'Quarantined'
+                quarantined += 1
+
+        self._update_detection_action_buttons()
+        QMessageBox.information(self, "Detections Quarantined", f"Quarantined {quarantined} detections. Skipped {skipped}.")
+
+    def _delete_selected_detections(self):
+        """Delete file-backed detections directly from the detections tab."""
+        selected_rows = sorted({item.row() for item in self.detections_table.selectedItems()})
+        if not selected_rows:
+            QMessageBox.warning(self, "No Selection", "Please select detections to delete.")
+            return
+
+        confirm = QMessageBox.question(
+            self,
+            "Confirm Deletion",
+            f"Permanently delete files for {len(selected_rows)} selected detections?\n\nThis cannot be undone.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        if confirm != QMessageBox.Yes:
+            return
+
+        deleted = 0
+        skipped = 0
+        for row in selected_rows:
+            if row < 0 or row >= len(self.detections):
+                continue
+
+            detection = self.detections[row]
+            file_path = str(detection.get('path', '')).strip()
+            if not file_path or file_path.lower() in ('n/a', 'na') or not os.path.exists(file_path):
+                skipped += 1
+                continue
+
+            if self._is_system_file_protected(file_path):
+                skipped += 1
+                continue
+
+            try:
+                os.remove(file_path)
+                detection['status'] = 'Deleted'
+                deleted += 1
+            except Exception:
+                skipped += 1
+
+        self._update_detection_action_buttons()
+        QMessageBox.information(self, "Detections Deleted", f"Deleted {deleted} detection files. Skipped {skipped}.")
         
     def _create_scan_results_tab(self):
         """Create dedicated scan results tab with enhanced visibility"""
@@ -2791,6 +3076,9 @@ class OrbitalStationUI(QMainWindow):
         # Refresh details panel with newest detection context
         if hasattr(self, 'detection_details_text') and self.detections:
             self.detection_details_text.setText(self._format_detection_details(detection))
+
+        if hasattr(self, 'detections_table'):
+            self._update_detection_action_buttons()
             
     # === FILE SCANNER METHODS ===
     
@@ -3588,6 +3876,10 @@ class OrbitalStationUI(QMainWindow):
     def quarantine_selected(self):
         """Quarantine selected item"""
         try:
+            if hasattr(self, 'detections_table') and hasattr(self, 'detections_tab') and self.tabs.currentWidget() is self.detections_tab:
+                self._quarantine_selected_detections()
+                return
+
             if hasattr(self, 'scan_results_table') and self._is_scan_results_tab_active():
                 self._quarantine_selected_results()
                 return
@@ -3605,7 +3897,11 @@ class OrbitalStationUI(QMainWindow):
                 self._quarantine_selected_files()
                 return
 
-            QMessageBox.information(self, "No Selection", "Select a threat in Scan Results or Filesystem Results to quarantine.")
+            if hasattr(self, 'detections_table') and self.detections_table.selectedItems():
+                self._quarantine_selected_detections()
+                return
+
+            QMessageBox.information(self, "No Selection", "Select a threat in Detections, Scan Results, or Filesystem Results to quarantine.")
         except Exception as e:
             self.log_output.append(f"❌ Quarantine selection error: {str(e)}")
 
@@ -4060,6 +4356,37 @@ class OrbitalStationUI(QMainWindow):
         
         QMessageBox.information(self, "Deletion Complete", message)
     
+    def delete_selected(self):
+        """Delete selected item from the currently active results tab."""
+        try:
+            if hasattr(self, 'detections_table') and hasattr(self, 'detections_tab') and self.tabs.currentWidget() is self.detections_tab:
+                self._delete_selected_detections()
+                return
+
+            if hasattr(self, 'scan_results_table') and self._is_scan_results_tab_active():
+                self._delete_selected_results()
+                return
+
+            if hasattr(self, 'fs_results_table') and self._is_filesystem_tab_active():
+                self._delete_selected_files()
+                return
+
+            if hasattr(self, 'detections_table') and self.detections_table.selectedItems():
+                self._delete_selected_detections()
+                return
+
+            if hasattr(self, 'scan_results_table') and self.scan_results_table.selectedItems():
+                self._delete_selected_results()
+                return
+
+            if hasattr(self, 'fs_results_table') and self.fs_results_table.selectedItems():
+                self._delete_selected_files()
+                return
+
+            QMessageBox.information(self, "No Selection", "Select a threat in Detections, Scan Results, or Filesystem Results to delete.")
+        except Exception as e:
+            self.log_output.append(f"❌ Delete selection error: {str(e)}")
+
     def _whitelist_selected_results(self):
         """Whitelist selected files to prevent future detection"""
         selected_rows = set()
