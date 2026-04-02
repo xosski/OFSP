@@ -932,12 +932,27 @@ class OrbitalStationUI(QMainWindow):
             if yara_manager and hasattr(yara_manager, 'is_system_file_protected'):
                 return bool(yara_manager.is_system_file_protected(file_path))
         except Exception as e:
-            self.log_output.append(f"⚠️ Protection check failed for {file_path}: {str(e)}")
+            self._append_log(f"⚠️ Protection check failed for {file_path}: {str(e)}")
         return False
+
+    def _append_log(self, message):
+        """Append to UI log when available, otherwise fallback to stdout during early startup."""
+        if hasattr(self, 'log_output') and self.log_output is not None:
+            self.log_output.append(message)
+        else:
+            try:
+                print(message)
+            except UnicodeEncodeError:
+                safe_message = str(message).encode('ascii', errors='replace').decode('ascii')
+                print(safe_message)
 
     def _should_auto_quarantine(self, detection):
         if not self.auto_quarantine_enabled:
             return False
+
+        # Browser cache findings should be contained immediately when a file artifact exists.
+        if detection.get('force_auto_quarantine'):
+            return True
 
         severity_ok = self._severity_score(detection.get('severity', 'Medium')) >= self._severity_score(self.auto_quarantine_min_severity)
         confidence_ok = self._normalize_confidence(detection.get('confidence')) >= self.auto_quarantine_min_confidence
@@ -965,12 +980,16 @@ class OrbitalStationUI(QMainWindow):
                 category = self._classify_detection_type(str(detection.get('type', 'Unknown'))) if hasattr(self, '_classify_detection_type') else 'unknown_magic'
                 tome_entry = {
                     'type': detection.get('type', 'Unknown'),
+                    'spell_category': category,
                     'process': detection.get('name', detection.get('process', 'Unknown')),
+                    'timestamp': detection.get('timestamp', datetime.now().strftime('%Y-%m-%d %H:%M:%S')),
                     'confidence': self._normalize_confidence(detection.get('confidence')),
                     'location': detection.get('path', f"Memory: {detection.get('address', 'N/A')}"),
                     'details': detection.get('description', detection.get('details', 'No details provided')),
                     'entropy': detection.get('entropy', 0.0),
                     'disassembly': detection.get('disassembly', ''),
+                    'risk': detection.get('severity', detection.get('risk', 'Medium')),
+                    'size': detection.get('size', 0),
                     'shellcode': detection.get('shellcode', b''),
                     'patterns': detection.get('patterns', []),
                     'commands': detection.get('commands', []),
@@ -1035,14 +1054,14 @@ class OrbitalStationUI(QMainWindow):
         try:
             if self.yara_manager and hasattr(self.yara_manager, 'is_system_file_protected'):
                 if self.yara_manager.is_system_file_protected(file_path):
-                    self.log_output.append(f"🛡️ Auto-quarantine skipped protected file: {file_path}")
+                    self._append_log(f"🛡️ Auto-quarantine skipped protected file: {file_path}")
                     return
         except Exception:
             pass
 
         if self._quarantine_file(file_path):
             detection['status'] = 'Auto-Quarantined'
-            self.log_output.append(f"🔒 Auto-quarantined detection artifact: {file_path}")
+            self._append_log(f"🔒 Auto-quarantined detection artifact: {file_path}")
         
     def _setup_styling(self):
         """Setup the dark cyberpunk styling"""
@@ -1402,7 +1421,8 @@ class OrbitalStationUI(QMainWindow):
             'code': finding.get('code', ''),
             'patterns': [finding.get('pattern')] if finding.get('pattern') else [],
             'confidence': finding.get('confidence', 'medium'),
-            'findings': [finding]
+            'findings': [finding],
+            'force_auto_quarantine': True
         }
         self._add_detection(detection)
         
@@ -5148,8 +5168,20 @@ class OrbitalStationUI(QMainWindow):
                         original_detection = spell_details['pattern_data']
                         # Merge the spell metadata with the original detection data
                         detection.update(original_detection)
+                    if spell_details:
+                        detection.setdefault('spell_category', spell_details.get('category', 'unknown_magic'))
+                        detection.setdefault('timestamp', spell_details.get('discovery_date', 'Unknown'))
+                        detection.setdefault('power_rating', spell_details.get('power_rating', detection.get('power', 'Unknown')))
+                        detection.setdefault('process', spell_details.get('process_name', detection.get('process', 'Unknown')))
+                        detection.setdefault('address', spell_details.get('memory_address', detection.get('address', 'Unknown')))
+                        detection.setdefault('disassembly', spell_details.get('disassembly', detection.get('disassembly', '')))
+
+                        metadata = spell_details.get('metadata') if isinstance(spell_details.get('metadata'), dict) else {}
+                        if metadata:
+                            detection.setdefault('size', metadata.get('shellcode_size', detection.get('size', 0)))
+                            detection.setdefault('details', metadata.get('details', detection.get('details', '')))
                 except Exception as e:
-                    self.log_output.append(f"❌ Error loading spell details: {str(e)}")
+                    self._append_log(f"❌ Error loading spell details: {str(e)}")
             
             # Update Raw Magic (Hex) view
             shellcode_bytes = detection.get('shellcode', b'')
@@ -5224,7 +5256,8 @@ class OrbitalStationUI(QMainWindow):
             # Core spell information
             metadata_output += f"📜 Spell Type: {detection.get('type', 'Unknown')}\n"
             metadata_output += f"⚔️ Target Process: {detection.get('process', 'Unknown')}\n"
-            metadata_output += f"📍 Memory Realm: {detection.get('address', 'Unknown')}\n"
+            memory_realm = detection.get('address', detection.get('location', 'Unknown'))
+            metadata_output += f"📍 Memory Realm: {memory_realm}\n"
             metadata_output += f"📏 Spell Size: {detection.get('size', 0)} bytes\n"
             metadata_output += f"🎯 Confidence: {detection.get('confidence', 0)}%\n"
             metadata_output += f"⚡ Power Level: {detection.get('power_rating', 'Unknown')}\n"
@@ -5251,7 +5284,7 @@ class OrbitalStationUI(QMainWindow):
             # Update Spell History view if available
             if hasattr(self, 'spell_history_view') and hasattr(self, 'shellcode_tome'):
                 try:
-                    spell_name = detection.get('type', 'Unknown')
+                    spell_name = detection.get('type') or detection.get('name') or detection.get('spell_name') or 'Unknown'
                     spell_category = detection.get('spell_category', 'unknown_magic')
                     
                     # Get spell history from tome
@@ -5277,7 +5310,7 @@ class OrbitalStationUI(QMainWindow):
                     self.spell_history_view.setText(f"Error loading spell history: {history_error}")
             
         except Exception as e:
-            self.log_output.append(f"❌ Error updating shellcode details: {str(e)}")
+            self._append_log(f"❌ Error updating shellcode details: {str(e)}")
             # Clear views on error
             if hasattr(self, 'shellcode_hex_view'):
                 self.shellcode_hex_view.setText("Error loading details")
@@ -5328,8 +5361,7 @@ class OrbitalStationUI(QMainWindow):
         try:
             if not hasattr(self, 'shellcode_tome') or not self.shellcode_tome:
                 # Backend may still be initializing; avoid noisy startup popups.
-                if hasattr(self, 'log_output'):
-                    self.log_output.append("⏳ Ancient Tome is still initializing...")
+                self._append_log("⏳ Ancient Tome is still initializing...")
                 return
             
             # Get current filter
@@ -5370,10 +5402,10 @@ class OrbitalStationUI(QMainWindow):
             for spell in spells:
                 self._add_spell_to_table(spell, from_tome=True)
             
-            self.log_output.append(f"📚 Browsed {len(spells)} ancient spells from the tome")
+            self._append_log(f"📚 Browsed {len(spells)} ancient spells from the tome")
             
         except Exception as e:
-            self.log_output.append(f"❌ Error browsing ancient tome: {str(e)}")
+            self._append_log(f"❌ Error browsing ancient tome: {str(e)}")
             QMessageBox.critical(self, "Tome Error", f"Failed to browse the ancient tome: {str(e)}")
     
     def _search_tome(self):
@@ -5408,13 +5440,13 @@ class OrbitalStationUI(QMainWindow):
                 self._add_spell_to_table(result, from_tome=True)
             
             if results:
-                self.log_output.append(f"🔍 Found {len(results)} spells matching '{search_term}'")
+                self._append_log(f"🔍 Found {len(results)} spells matching '{search_term}'")
             else:
-                self.log_output.append(f"🔍 No spells found matching '{search_term}'")
+                self._append_log(f"🔍 No spells found matching '{search_term}'")
                 QMessageBox.information(self, "Search Results", f"No spells found matching '{search_term}'")
             
         except Exception as e:
-            self.log_output.append(f"❌ Error searching tome: {str(e)}")
+            self._append_log(f"❌ Error searching tome: {str(e)}")
             QMessageBox.critical(self, "Search Error", f"Failed to search the tome: {str(e)}")
     
     def _show_tome_statistics(self):
@@ -5496,14 +5528,16 @@ class OrbitalStationUI(QMainWindow):
             # Format spell data for display
             if from_tome:
                 # Data from tome database
+                spell_location = spell_data.get('location') or spell_data.get('address') or spell_data.get('memory_address') or 'Tome Archive'
+                spell_size = spell_data.get('size') if spell_data.get('size') not in (None, '') else spell_data.get('shellcode_size', 'N/A')
                 items = [
                     QTableWidgetItem(spell_data.get('discovered', 'Unknown')),
                     QTableWidgetItem(spell_data.get('name', 'Unknown Spell')),
                     QTableWidgetItem(spell_data.get('process', 'Unknown')),
-                    QTableWidgetItem('Tome Archive'),
+                    QTableWidgetItem(str(spell_location)),
                     QTableWidgetItem(spell_data.get('confidence', 'Unknown')),
                     QTableWidgetItem(str(spell_data.get('power', 1))),
-                    QTableWidgetItem('N/A'),
+                    QTableWidgetItem(str(spell_size)),
                     QTableWidgetItem(str(spell_data.get('encounters', 1))),
                     QTableWidgetItem("📖 View Details")
                 ]
@@ -5554,10 +5588,35 @@ class OrbitalStationUI(QMainWindow):
                 items[5].setBackground(color)
             
             # Store spell data for detailed view
-            items[0].setData(Qt.UserRole, spell_data)
-            
+            if from_tome and spell_data.get('id'):
+                enriched_spell = dict(spell_data)
+                try:
+                    spell_details = self.shellcode_tome.get_spell_details(spell_data.get('id')) if self.shellcode_tome else None
+                except Exception:
+                    spell_details = None
+
+                if spell_details:
+                    pattern_data = spell_details.get('pattern_data') or {}
+                    if isinstance(pattern_data, dict):
+                        enriched_spell.update(pattern_data)
+
+                    metadata = spell_details.get('metadata') or {}
+                    if isinstance(metadata, dict):
+                        if not enriched_spell.get('size'):
+                            enriched_spell['size'] = metadata.get('shellcode_size', enriched_spell.get('size', 0))
+                        if not enriched_spell.get('details'):
+                            enriched_spell['details'] = metadata.get('details', enriched_spell.get('details', ''))
+
+                    enriched_spell['spell_category'] = spell_details.get('category', enriched_spell.get('spell_category', 'unknown_magic'))
+                    enriched_spell['timestamp'] = spell_details.get('discovery_date', enriched_spell.get('timestamp', enriched_spell.get('discovered', 'Unknown')))
+                    enriched_spell['risk'] = enriched_spell.get('risk', enriched_spell.get('severity', 'Medium'))
+
+                items[0].setData(Qt.UserRole, enriched_spell)
+            else:
+                items[0].setData(Qt.UserRole, spell_data)
+
         except Exception as e:
-            self.log_output.append(f"❌ Error adding spell to table: {str(e)}")
+            self._append_log(f"❌ Error adding spell to table: {str(e)}")
     
     def _get_category_from_filter(self, filter_text):
         """Convert filter display text to internal category name"""

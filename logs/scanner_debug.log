@@ -58,3 +58,5 @@
 2026-04-01 12:17:48,497 - DEBUG - Memory.py:371 - Detailed logging enabled
 2026-04-01 18:58:24,949 - INFO - Memory.py:370 - Scanner logging initialized
 2026-04-01 18:58:24,950 - DEBUG - Memory.py:371 - Detailed logging enabled
+2026-04-01 19:15:18,266 - INFO - Memory.py:370 - Scanner logging initialized
+2026-04-01 19:15:18,267 - DEBUG - Memory.py:371 - Detailed logging enabled
