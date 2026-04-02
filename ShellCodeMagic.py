@@ -2098,6 +2098,121 @@ class ShellCodeTome:
         }
         canonical = json.dumps(self._json_safe(identity), sort_keys=True)
         return hashlib.sha256(canonical.encode('utf-8')).hexdigest()[:16]
+
+    def _extract_exact_shellcode(self, entry):
+        """Extract exact shellcode bytes from common entry layouts."""
+        candidates = [
+            entry.get('shellcode'),
+            entry.get('data'),
+            entry.get('memory_content'),
+            entry.get('raw_shellcode'),
+        ]
+
+        analysis = entry.get('shellcode_analysis')
+        if isinstance(analysis, dict):
+            candidates.extend([
+                analysis.get('shellcode'),
+                analysis.get('data'),
+                analysis.get('memory_data'),
+                analysis.get('raw_shellcode'),
+            ])
+
+        for candidate in candidates:
+            if isinstance(candidate, bytes) and candidate:
+                return candidate
+            if isinstance(candidate, str):
+                cleaned = candidate.strip().replace(' ', '')
+                if cleaned.startswith('0x'):
+                    cleaned = cleaned[2:]
+                if cleaned and len(cleaned) % 2 == 0:
+                    try:
+                        return bytes.fromhex(cleaned)
+                    except ValueError:
+                        pass
+
+        return b''
+
+    def _extract_command_context(self, entry):
+        """Collect command-line and command history details for persistent context."""
+        commands = []
+
+        direct_fields = [
+            entry.get('command'),
+            entry.get('cmdline'),
+            entry.get('command_line'),
+            entry.get('process_command_line'),
+        ]
+
+        for value in direct_fields:
+            if isinstance(value, str) and value.strip():
+                commands.append(value.strip())
+
+        list_fields = [entry.get('commands'), entry.get('command_history')]
+        for value in list_fields:
+            if isinstance(value, list):
+                for cmd in value:
+                    if isinstance(cmd, str) and cmd.strip():
+                        commands.append(cmd.strip())
+
+        process_obj = entry.get('process')
+        if isinstance(process_obj, dict):
+            for key in ('cmdline', 'command_line', 'command'):
+                proc_cmd = process_obj.get(key)
+                if isinstance(proc_cmd, str) and proc_cmd.strip():
+                    commands.append(proc_cmd.strip())
+
+        # Preserve order while deduplicating
+        deduped = []
+        seen = set()
+        for cmd in commands:
+            if cmd not in seen:
+                deduped.append(cmd)
+                seen.add(cmd)
+
+        return deduped
+
+    def _extract_findings(self, entry):
+        """Collect detailed findings so the tome keeps full context of what was found."""
+        findings = []
+
+        if entry.get('details'):
+            findings.append(entry.get('details'))
+
+        if entry.get('patterns'):
+            findings.append({'patterns': entry.get('patterns')})
+
+        analysis = entry.get('shellcode_analysis')
+        if isinstance(analysis, dict):
+            if analysis.get('patterns_found'):
+                findings.append({'patterns_found': analysis.get('patterns_found')})
+            if analysis.get('shellcode_score') is not None:
+                findings.append({'shellcode_score': analysis.get('shellcode_score')})
+            if analysis.get('entropy') is not None:
+                findings.append({'entropy': analysis.get('entropy')})
+            if analysis.get('disassembly'):
+                findings.append({'disassembly': analysis.get('disassembly')})
+
+        return findings
+
+    def _enrich_entry_for_persistence(self, entry):
+        """Normalize entry so exact shellcode, commands, and findings are always preserved."""
+        enriched = dict(entry)
+        exact_shellcode = self._extract_exact_shellcode(enriched)
+        command_context = self._extract_command_context(enriched)
+        findings = self._extract_findings(enriched)
+
+        if exact_shellcode:
+            enriched['shellcode'] = exact_shellcode
+            enriched['shellcode_hex'] = exact_shellcode.hex()
+            enriched['shellcode_size'] = len(exact_shellcode)
+
+        if command_context:
+            enriched['commands'] = command_context
+
+        if findings:
+            enriched['findings'] = findings
+
+        return enriched
     
     def ensure_tome_directory(self):
         """Ensure the ancient tome's directory structure exists"""
@@ -2267,6 +2382,8 @@ class ShellCodeTome:
         if category not in self.detections:
             # Unknown magic gets added to unknown_magic category
             category = 'unknown_magic'
+
+        entry = self._enrich_entry_for_persistence(entry)
             
         # Enhanced entry with magical metadata
         now_iso = datetime.now().isoformat()
@@ -2416,6 +2533,10 @@ class ShellCodeTome:
                 'disassembly': entry.get('disassembly', ''),
                 'metadata': json.dumps({
                     'details': self._json_safe(entry.get('details', '')),
+                    'findings': self._json_safe(entry.get('findings', [])),
+                    'commands': self._json_safe(entry.get('commands', [])),
+                    'shellcode_hex': entry.get('shellcode_hex', ''),
+                    'shellcode_size': entry.get('shellcode_size', 0),
                     'tome_power_level': entry.get('tome_wisdom_level', 1)
                 })
             }
@@ -2829,7 +2950,10 @@ class ShellCodeTome:
                     'details': f"Score: {shellcode_results['shellcode_score']}, Patterns: {len(shellcode_results['patterns_found'])}",
                     'confidence': 'high' if shellcode_results['shellcode_score'] > 40 else 'medium',
                     'location': f'Memory region at {hex(base_addr)}, size: {region_size}',
-                    'shellcode_analysis': shellcode_results
+                    'shellcode_analysis': shellcode_results,
+                    'shellcode': memory_content,
+                    'findings': shellcode_results.get('patterns_found', []),
+                    'commands': [shellcode_results.get('process', {}).get('cmdline', '')] if shellcode_results.get('process', {}).get('cmdline') else []
                 }
                 
                 # Add the detection
@@ -2845,9 +2969,12 @@ class ShellCodeTome:
                         'type': f'Shellcode Pattern: {pattern["pattern"]}',
                         'details': f'Found at offset {pattern["offset"]}, signature: {pattern["hex_signature"]}',
                         'confidence': 'medium',
-                        'location': f'Memory region at {hex(pattern["address"])}'
+                        'location': f'Memory region at {hex(pattern["address"])}',
+                        'shellcode': memory_content,
+                        'findings': [pattern]
                     }
                     detections.append(pattern_detection)
+                    self.add_detection(pattern_detection)
                     
         except Exception as e:
             logging.debug(f"Error in shellcode detection: {str(e)}")
@@ -2914,9 +3041,12 @@ class ShellCodeTome:
                         'type': 'Suspicious API Reference',
                         'details': f'{description} found in memory',
                         'confidence': 'low',
-                        'location': f'Memory region at {hex(base_addr)}, size: {region_size}'
+                        'location': f'Memory region at {hex(base_addr)}, size: {region_size}',
+                        'shellcode': memory_content,
+                        'findings': [description]
                     }
                     detections.append(detection)
+                    self.add_detection(detection)
             
             # Check for executable characteristics
             if hasattr(self.Magic, 'magic_analyzer'):
@@ -2928,9 +3058,12 @@ class ShellCodeTome:
                         'type': 'Executable Content',
                         'details': f'Magic analysis: {magic_result}',
                         'confidence': 'medium',
-                        'location': f'Memory region at {hex(base_addr)}, size: {region_size}'
+                        'location': f'Memory region at {hex(base_addr)}, size: {region_size}',
+                        'shellcode': memory_content,
+                        'findings': [magic_result]
                     }
                     detections.append(detection)
+                    self.add_detection(detection)
                     
         except Exception as e:
             logging.debug(f"Error in additional heuristic checks: {str(e)}")
@@ -3078,13 +3211,12 @@ class ShellCodeTome:
         elif 'yara rule' in detection_type:
             category = 'yara_matches'
         
-        # Add detection to the appropriate category
-        self.detections[category].append(detection)
-        self.total_detections += 1
-        
+        # Persist detection to tome with full context (shellcode, commands, findings)
+        self.add_entry(category, detection)
+
         # Log the detection
         logging.info(f"Added {detection_type} detection to ShellCodeTome: {detection.get('details', '')}")
-        
+
         return category
 
     # Other existing methods remain the same

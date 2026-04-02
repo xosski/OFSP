@@ -3,7 +3,7 @@
         meta:
             description = "Basic detection rule for shellcode"
             author = "YaraRuleManager"
-            created = "2026-03-31"
+            created = "2026-04-01"
         
         strings:
             $str1 = "shellcode" nocase

@@ -576,6 +576,15 @@ class OrbitalStationUI(QMainWindow):
         self.malware_scanner = None
         self.backend_init_worker = None
         self.backend_ready = False
+
+        # Initialize a local tome immediately so Ancient Tome tab works on startup,
+        # even before async backend initialization finishes.
+        if ShellCodeMagic:
+            try:
+                from ShellCodeMagic import ShellCodeTome
+                self.shellcode_tome = ShellCodeTome()
+            except Exception:
+                self.shellcode_tome = None
         
         # Setup styling and create UI FIRST (so user sees something)
         self._setup_styling()
@@ -822,6 +831,14 @@ class OrbitalStationUI(QMainWindow):
         self.backend_ready = True
         self.status_message.setText("Backend initialized")
         self.initial_protection()
+
+        # Refresh Ancient Tome UI with the backend-provided components/data.
+        try:
+            self._update_tome_wisdom_display()
+            self._refresh_tome_tab_if_visible()
+        except Exception:
+            pass
+
         self.backend_init_worker = None
 
     def _on_backend_init_failed(self, error_message):
@@ -956,9 +973,12 @@ class OrbitalStationUI(QMainWindow):
                     'disassembly': detection.get('disassembly', ''),
                     'shellcode': detection.get('shellcode', b''),
                     'patterns': detection.get('patterns', []),
+                    'commands': detection.get('commands', []),
+                    'findings': detection.get('findings', []),
                     'metadata': detection
                 }
                 self.shellcode_tome.add_entry(category, tome_entry)
+                self._refresh_tome_tab_if_visible()
 
             if self.hades_kb:
                 class _Finding:
@@ -983,6 +1003,21 @@ class OrbitalStationUI(QMainWindow):
         except Exception as e:
             if hasattr(self, 'log_output'):
                 self.log_output.append(f"⚠️ Knowledge ingestion warning: {str(e)}")
+
+    def _refresh_tome_tab_if_visible(self):
+        """Refresh Ancient Tome table only when the tab is active."""
+        try:
+            if not hasattr(self, 'tabs') or not hasattr(self, 'shellcode_table'):
+                return
+
+            current_tab = self.tabs.currentWidget()
+            for i in range(self.tabs.count()):
+                if self.tabs.tabText(i) == "🧙‍♂️ Ancient Tome" and self.tabs.widget(i) is current_tab:
+                    self._browse_ancient_tome()
+                    break
+        except Exception as e:
+            if hasattr(self, 'log_output'):
+                self.log_output.append(f"⚠️ Tome refresh warning: {str(e)}")
 
     def _attempt_auto_quarantine(self, detection):
         """Automatically quarantine high-risk detections when safe to do so."""
@@ -1356,11 +1391,18 @@ class OrbitalStationUI(QMainWindow):
         # Also add to main OFSP detections
         detection = {
             'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-            'type': f"HadesAI: {finding.get('type', 'Unknown')}",
+            'type': f"HadesAI Cache: {finding.get('type', 'Unknown')}",
             'name': finding.get('path', 'Unknown')[:30],
             'pid': 'N/A',
             'severity': finding.get('severity', 'Medium'),
-            'description': finding.get('code', '')[:100]
+            'description': finding.get('code', finding.get('pattern', ''))[:300],
+            'details': finding.get('context', finding.get('pattern', 'Hades cache finding')),
+            'path': finding.get('path', 'N/A'),
+            'browser': finding.get('browser', 'Unknown'),
+            'code': finding.get('code', ''),
+            'patterns': [finding.get('pattern')] if finding.get('pattern') else [],
+            'confidence': finding.get('confidence', 'medium'),
+            'findings': [finding]
         }
         self._add_detection(detection)
         
@@ -1372,6 +1414,7 @@ class OrbitalStationUI(QMainWindow):
         self.hades_chat_output.append(f"Files scanned: {stats.get('total_files', 0)}")
         self.hades_chat_output.append(f"Threats found: {stats.get('threats', 0)}")
         self._refresh_hades_stats()
+        self._refresh_tome_tab_if_visible()
     
     def _hades_start_network_monitor(self):
         """Start network monitoring"""
@@ -2158,7 +2201,9 @@ class OrbitalStationUI(QMainWindow):
             "All Spells", "🪄 API Hashing", "🥚 Egg Hunters", "💉 Process Injection",
             "⚗️ XOR Encoding", "📚 Stack Strings", "🏛️ PEB Access", "🪞 Reflective Loading",
             "⛓️ ROP Chains", "🐚 Pure Shellcode", "🔥 RWX Memory", "⚡ WX Memory",
-            "🌊 CFG Bypass", "👻 Process Hollowing", "🌟 Unknown Magic"
+            "🌊 CFG Bypass", "👻 Process Hollowing", "🌫️ Suspicious Memory",
+            "📋 Unsigned Modules", "🗝️ Suspicious Registry", "👑 Suspicious Cmdline",
+            "🎯 YARA Matches", "🌟 Unknown Magic"
         ])
         
         settings_row.addWidget(sensitivity_label)
@@ -2282,7 +2327,8 @@ class OrbitalStationUI(QMainWindow):
         
         # Initialize tome wisdom display
         self._update_tome_wisdom_display()
-        
+        self._browse_ancient_tome()
+
         self.tabs.addTab(widget, "🧙‍♂️ Ancient Tome")
         
     def _create_process_tab(self):
@@ -2871,7 +2917,7 @@ class OrbitalStationUI(QMainWindow):
         """Add detection to live scan results table"""
         try:
             # Update scan status
-            process_name = detection.get('process', 'Unknown')
+            process_name = detection.get('process') or detection.get('name', 'Unknown')
             detection_type = detection.get('type', 'Unknown')
             self.scan_status_text.append(f"🎯 Detection: {detection_type} in {process_name}")
             
@@ -2880,10 +2926,10 @@ class OrbitalStationUI(QMainWindow):
             self.live_detections_table.insertRow(current_row)
             
             timestamp = detection.get('timestamp', datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-            process = detection.get('process', 'Unknown')
-            address = detection.get('address', 'N/A')
-            confidence = detection.get('confidence', 'Unknown')
-            risk = detection.get('risk', 'Medium')
+            process = detection.get('process') or detection.get('name', 'Unknown')
+            address = detection.get('address', detection.get('location', detection.get('path', 'N/A')))
+            confidence = detection.get('confidence', detection.get('severity', 'Unknown'))
+            risk = detection.get('risk', detection.get('severity', 'Medium'))
             size = detection.get('size', 0)
             
             items = [
@@ -5281,7 +5327,9 @@ class OrbitalStationUI(QMainWindow):
         """📚 Browse all spells in the ancient tome"""
         try:
             if not hasattr(self, 'shellcode_tome') or not self.shellcode_tome:
-                QMessageBox.warning(self, "Tome Unavailable", "The Ancient Shellcode Tome is not initialized.")
+                # Backend may still be initializing; avoid noisy startup popups.
+                if hasattr(self, 'log_output'):
+                    self.log_output.append("⏳ Ancient Tome is still initializing...")
                 return
             
             # Get current filter
@@ -5304,6 +5352,11 @@ class OrbitalStationUI(QMainWindow):
                     "⚡ WX Memory": "wx_memory",
                     "🌊 CFG Bypass": "cfg_bypass",
                     "👻 Process Hollowing": "process_hollowing",
+                    "🌫️ Suspicious Memory": "suspicious_memory",
+                    "📋 Unsigned Modules": "unsigned_modules",
+                    "🗝️ Suspicious Registry": "suspicious_registry",
+                    "👑 Suspicious Cmdline": "suspicious_cmdline",
+                    "🎯 YARA Matches": "yara_matches",
                     "🌟 Unknown Magic": "unknown_magic"
                 }
                 category = category_map.get(category_filter)
@@ -5522,6 +5575,11 @@ class OrbitalStationUI(QMainWindow):
             "⚡ WX Memory": "wx_memory",
             "🌊 CFG Bypass": "cfg_bypass",
             "👻 Process Hollowing": "process_hollowing",
+            "🌫️ Suspicious Memory": "suspicious_memory",
+            "📋 Unsigned Modules": "unsigned_modules",
+            "🗝️ Suspicious Registry": "suspicious_registry",
+            "👑 Suspicious Cmdline": "suspicious_cmdline",
+            "🎯 YARA Matches": "yara_matches",
             "🌟 Unknown Magic": "unknown_magic"
         }
         return category_map.get(filter_text)
