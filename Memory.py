@@ -58,7 +58,7 @@ except ImportError:
 SIZE_T = c_size_t
 class MemoryScanner:
     _instance = None
-    _initialized = True
+    _initialized = False
     shared_yara_manager = None  # Class variable to share YARA manager across instances
     kernel32 = ctypes.windll.kernel32
     kernel32: ctypes.WinDLL = ctypes.WinDLL('kernel32')
@@ -83,7 +83,7 @@ class MemoryScanner:
         self.enable_debug_privilege()
         
         if not MemoryScanner._initialized:
-            self.gui = self.update_gui_detections()
+            self.gui = None
             MemoryScanner._initialized = True
             self.enable_debug_privilege()
             logging.info("MemoryScanner")
