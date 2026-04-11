@@ -11,6 +11,7 @@ import logging
 import traceback
 import threading
 import time
+import subprocess
 import importlib
 from datetime import datetime
 import psutil
@@ -98,6 +99,7 @@ class ScanWorker(QThread):
         self.scan_type = scan_type
         self.parent_ui = parent_ui
         self.should_stop = False
+        self.processes_scanned = 0
         
     def run(self):
         """Run the scan in background"""
@@ -156,6 +158,8 @@ class ScanWorker(QThread):
                 except (psutil.NoSuchProcess, psutil.AccessDenied):
                     continue
                     
+            self.processes_scanned = total
+
             self.progress_updated.emit(100, "Quick scan completed")
             self.scan_completed.emit([])
             
@@ -205,6 +209,8 @@ class ScanWorker(QThread):
                 except (psutil.NoSuchProcess, psutil.AccessDenied):
                     continue
                     
+            self.processes_scanned = total
+
             self.progress_updated.emit(100, "Deep scan completed")
             self.scan_completed.emit([])
             
@@ -899,13 +905,41 @@ class OrbitalStationUI(QMainWindow):
         except Exception:
             return 0
 
+    def _normalize_candidate_path(self, file_path):
+        """Normalize UI/export-decorated path strings into actionable filesystem paths."""
+        file_path = str(file_path).strip()
+        if not file_path:
+            return None
+
+        # Normalize common UI/export wrappers around valid paths.
+        if (file_path.startswith('"') and file_path.endswith('"')) or (file_path.startswith("'") and file_path.endswith("'")):
+            file_path = file_path[1:-1].strip()
+
+        if file_path.lower().startswith('file:///'):
+            file_path = file_path[8:]
+            file_path = urllib.parse.unquote(file_path)
+            if re.match(r'^/[a-zA-Z]:', file_path):
+                file_path = file_path[1:]
+
+        # Remove Windows long-path prefix when present.
+        if file_path.startswith('\\\\?\\'):
+            file_path = file_path[4:]
+
+        # Expand environment variables (e.g. %TEMP%) and user home.
+        file_path = os.path.expandvars(os.path.expanduser(file_path))
+
+        # Trim accidental trailing separators/whitespace while preserving roots.
+        file_path = file_path.strip()
+
+        return file_path
+
     def _resolve_actionable_file_path(self, table, row, path_column=1):
         """Return a valid filesystem path from a table row, or None if not actionable."""
         path_item = table.item(row, path_column)
         if not path_item:
             return None
 
-        file_path = str(path_item.text()).strip()
+        file_path = self._normalize_candidate_path(path_item.text())
         if not file_path:
             return None
 
@@ -945,6 +979,12 @@ class OrbitalStationUI(QMainWindow):
                 details_item.text() if details_item else "",
             ]
 
+            # Include all row columns to catch PID stored in non-standard cells.
+            for col in range(self.scan_results_table.columnCount()):
+                item = self.scan_results_table.item(row, col)
+                if item:
+                    candidates.append(item.text())
+
             for candidate in candidates:
                 if not candidate:
                     continue
@@ -971,6 +1011,28 @@ class OrbitalStationUI(QMainWindow):
             return None
         return None
 
+    def _infer_pid_from_process_name(self, process_name):
+        """Best-effort PID inference from process name when row text lacks explicit PID."""
+        process_name = str(process_name or '').strip().lower()
+        if not process_name:
+            return None
+
+        # Normalize threat labels like "foo.exe (Suspicious)" -> "foo.exe"
+        process_name = re.sub(r'\s*\(.*\)$', '', process_name).strip()
+
+        try:
+            for proc in psutil.process_iter(['pid', 'name']):
+                try:
+                    name = str(proc.info.get('name', '')).strip().lower()
+                    if name and name == process_name:
+                        return int(proc.info.get('pid'))
+                except (psutil.NoSuchProcess, psutil.AccessDenied, TypeError, ValueError):
+                    continue
+        except Exception:
+            return None
+
+        return None
+
     def _quarantine_process_pid(self, pid, process_name, details_text=""):
         """Quarantine process by suspending it and storing context when possible."""
         if pid is None:
@@ -981,7 +1043,30 @@ class OrbitalStationUI(QMainWindow):
 
         try:
             proc = psutil.Process(pid)
-            proc.suspend()
+            suspended = False
+            errors = []
+
+            # Primary quarantine action: suspend the process.
+            try:
+                proc.suspend()
+                suspended = True
+            except Exception as suspend_error:
+                errors.append(f"suspend failed: {suspend_error}")
+
+            # Fallback quarantine action: terminate when suspend is not permitted.
+            if not suspended:
+                try:
+                    proc.terminate()
+                    try:
+                        proc.wait(timeout=3)
+                    except Exception:
+                        proc.kill()
+                    suspended = True
+                except Exception as terminate_error:
+                    errors.append(f"terminate fallback failed: {terminate_error}")
+
+            if not suspended:
+                return False, f"Failed to quarantine process PID {pid}: {'; '.join(errors)}"
 
             if getattr(self, 'threat_quarantine', None) and hasattr(self.threat_quarantine, 'quarantine_process'):
                 try:
@@ -997,7 +1082,7 @@ class OrbitalStationUI(QMainWindow):
                 except Exception:
                     pass
 
-            return True, f"Suspended process {process_name} (PID: {pid})"
+            return True, f"Quarantined process {process_name} (PID: {pid})"
         except Exception as e:
             return False, f"Failed to quarantine process PID {pid}: {str(e)}"
 
@@ -1011,6 +1096,7 @@ class OrbitalStationUI(QMainWindow):
 
         try:
             proc = psutil.Process(pid)
+            errors = []
             proc.terminate()
             try:
                 proc.wait(timeout=3)
@@ -1018,7 +1104,26 @@ class OrbitalStationUI(QMainWindow):
                 try:
                     proc.kill()
                 except Exception:
-                    pass
+                    errors.append("psutil kill failed")
+
+            if proc.is_running():
+                # Windows fallback: force kill via taskkill if process survived psutil calls.
+                try:
+                    taskkill = subprocess.run(
+                        ["taskkill", "/PID", str(pid), "/F", "/T"],
+                        capture_output=True,
+                        text=True,
+                        timeout=5,
+                    )
+                    if taskkill.returncode != 0:
+                        errors.append(taskkill.stderr.strip() or taskkill.stdout.strip() or "taskkill failed")
+                except Exception as taskkill_error:
+                    errors.append(f"taskkill error: {taskkill_error}")
+
+            if proc.is_running():
+                details = '; '.join([e for e in errors if e]) or "process still running"
+                return False, f"Failed to terminate process PID {pid}: {details}"
+
             return True, f"Terminated process {process_name} (PID: {pid})"
         except Exception as e:
             return False, f"Failed to terminate process PID {pid}: {str(e)}"
@@ -1168,6 +1273,20 @@ class OrbitalStationUI(QMainWindow):
         if self._quarantine_file(file_path):
             detection['status'] = 'Auto-Quarantined'
             self._append_log(f"🔒 Auto-quarantined detection artifact: {file_path}")
+
+    def _is_yara_detection(self, detection):
+        """Return True when detection is associated with a YARA match/signature hit."""
+        detection_type = str(detection.get('type', '')).lower()
+        description = str(detection.get('description', detection.get('details', ''))).lower()
+        action = str(detection.get('action', '')).lower()
+
+        if 'yara' in detection_type or 'yara' in description or 'yara' in action:
+            return True
+        if 'signature match' in description or 'rule match' in description:
+            return True
+        if bool(detection.get('yara_match')) or bool(detection.get('matched_rule')):
+            return True
+        return False
         
     def _setup_styling(self):
         """Setup the dark cyberpunk styling"""
@@ -3161,10 +3280,36 @@ class OrbitalStationUI(QMainWindow):
         if hasattr(self, 'scan_status_text'):
             self.scan_status_text.append(f"📊 {message} ({progress}%)")
         
+    def _update_scan_results_summary(self, files_scanned=None, scan_type=None):
+        """Update Scan Results header metadata for any completed scan mode."""
+        if not hasattr(self, 'sr_last_scan_label'):
+            return
+
+        scanned_value = files_scanned
+        if scanned_value is None:
+            scanned_value = getattr(self, 'files_scanned', 0)
+        if scanned_value is None:
+            scanned_value = 0
+
+        try:
+            scanned_value = int(scanned_value)
+        except Exception:
+            scanned_value = 0
+
+        label_scan_type = str(scan_type).title() if scan_type else "Unknown"
+        self.sr_files_scanned_label.setText(f"Files Scanned: {scanned_value}")
+        self.sr_last_scan_label.setText(f"Last Scan: {datetime.now().strftime('%H:%M:%S')}")
+        self.sr_scan_type_label.setText(f"Scan Type: {label_scan_type}")
+
     def _scan_completed(self, results):
         """Handle scan completion"""
         self.scanning = False
         self._update_scan_ui_end()
+
+        completed_scan_type = getattr(self.scan_worker, 'scan_type', 'Unknown') if getattr(self, 'scan_worker', None) else 'Unknown'
+        completed_scanned_count = getattr(self.scan_worker, 'processes_scanned', 0) if getattr(self, 'scan_worker', None) else 0
+        self.total_processes_scanned = completed_scanned_count
+        self._update_scan_results_summary(files_scanned=completed_scanned_count, scan_type=completed_scan_type)
         
         # Update live scan status if available
         if hasattr(self, 'scan_status_text'):
@@ -3192,6 +3337,11 @@ class OrbitalStationUI(QMainWindow):
             detection['description'] = detection.get('details', 'Detection event captured')
         if 'path' not in detection and 'file_path' in detection:
             detection['path'] = detection.get('file_path')
+
+        # Enforce immediate quarantine policy for YARA-triggered detections.
+        if self._is_yara_detection(detection):
+            detection['force_auto_quarantine'] = True
+            detection.setdefault('severity', 'High')
 
         self.detections.append(detection)
         self.threats_found += 1
@@ -3796,14 +3946,8 @@ class OrbitalStationUI(QMainWindow):
         self.fs_progress_bar.setValue(100)
         
         # Update scan results tab summary
-        from datetime import datetime
-        self.sr_files_scanned_label.setText(f"Files Scanned: {self.fs_files_scanned}")
-        self.sr_last_scan_label.setText(f"Last Scan: {datetime.now().strftime('%H:%M:%S')}")
-        
-        # Determine scan type
-        if hasattr(self, 'fs_scan_worker') and self.fs_scan_worker:
-            scan_type = getattr(self.fs_scan_worker, 'scan_type', 'Unknown')
-            self.sr_scan_type_label.setText(f"Scan Type: {scan_type.title()}")
+        fs_scan_type = getattr(self.fs_scan_worker, 'scan_type', 'Unknown') if self.fs_scan_worker else 'Unknown'
+        self._update_scan_results_summary(files_scanned=self.fs_files_scanned, scan_type=fs_scan_type)
         
         # Show completion message
         if self.fs_threats_found > 0:
@@ -4453,6 +4597,8 @@ class OrbitalStationUI(QMainWindow):
             if not file_path:
                 pid = self._extract_pid_from_scan_result_row(row)
                 if pid is None:
+                    pid = self._infer_pid_from_process_name(threat_name)
+                if pid is None:
                     skipped_no_target_count += 1
                     self.log_output.append(
                         f"⚠️ Skipping quarantine for row {row + 1}: no filesystem path and no PID found "
@@ -4536,6 +4682,8 @@ class OrbitalStationUI(QMainWindow):
             threat_path = threat_path_item.text() if threat_path_item else ""
             if not file_path:
                 pid = self._extract_pid_from_scan_result_row(row)
+                if pid is None:
+                    pid = self._infer_pid_from_process_name(threat_name)
                 if pid is None:
                     skipped_no_target_count += 1
                     self.log_output.append(
@@ -4831,6 +4979,9 @@ class OrbitalStationUI(QMainWindow):
             if not file_path:
                 self.log_output.append("⚠️ Empty file path provided for quarantine")
                 return False
+
+            # Normalize any decorated path text before using filesystem operations.
+            file_path = self._normalize_candidate_path(file_path) or str(file_path).strip()
 
             file_path_lower = file_path.lower()
             if file_path_lower.startswith('pid:') or file_path_lower.startswith('memory:') or file_path_lower in ('n/a', 'na'):
