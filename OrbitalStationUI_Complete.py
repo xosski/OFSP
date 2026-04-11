@@ -5719,6 +5719,331 @@ class OrbitalStationUI(QMainWindow):
         except Exception as e:
             return f"Error formatting hex dump: {str(e)}"
 
+    # === LEGACY ScannerGui COMPATIBILITY API ===
+
+    def __new__(cls, *args, **kwargs):
+        """Compatibility constructor for legacy ScannerGui call sites."""
+        return super().__new__(cls)
+
+    def _setup_logging(self):
+        """Legacy logging setup entrypoint."""
+        self.logger = logging.getLogger('OrbitalStationUI')
+        return self.logger
+
+    def create_utility_functions(self):
+        """Legacy no-op hook retained for ScannerGui compatibility."""
+        return None
+
+    def setup_gui(self):
+        """Legacy GUI setup entrypoint (UI is already created in __init__)."""
+        if not hasattr(self, 'tabs'):
+            self._create_ui()
+
+    def create_tabs(self):
+        """Legacy tab creation hook (tabs are built by _create_ui)."""
+        return None
+
+    def create_tree_utilities(self):
+        """Legacy tree utility hook retained for API compatibility."""
+        return None
+
+    def update_rule_status(self):
+        self.update_rule_status_display()
+
+    def update_rule_status_display(self):
+        if hasattr(self, 'rules_label'):
+            self.rules_label.setText("Rules: Loaded" if self.rules_loaded else "Rules: Failed")
+
+    def initialize_security_patches(self):
+        """Legacy bootstrap hook mapped to protection initialization."""
+        self.initial_protection()
+
+    def update_gui_detections(self):
+        """Refresh detection table from stored detections."""
+        if not hasattr(self, 'detections_table'):
+            return
+        self.detections_table.setRowCount(0)
+        for detection in self.detections:
+            self._add_detection(dict(detection))
+
+    def update_status(self, message):
+        self.set_status_label(message)
+
+    def set_status_label(self, message):
+        if hasattr(self, 'status_message'):
+            self.status_message.setText(str(message))
+        elif hasattr(self, 'status_label'):
+            self.status_label.setText(str(message))
+
+    def create_detection_item(self, detection):
+        """Return normalized detection dict for legacy callers."""
+        if isinstance(detection, dict):
+            return detection
+        return {
+            'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            'type': 'Detection',
+            'name': str(detection),
+            'severity': 'Medium',
+            'description': str(detection)
+        }
+
+    def update_quarantine_settings(self):
+        """Apply legacy quarantine controls to modern auto-quarantine settings."""
+        enabled = True
+        threshold = 70
+
+        try:
+            if hasattr(self, 'quarantine_var'):
+                enabled = bool(self.quarantine_var.get())
+        except Exception:
+            pass
+
+        try:
+            if hasattr(self, 'threshold_var'):
+                threshold = int(self.threshold_var.get())
+        except Exception:
+            pass
+
+        self.auto_quarantine_enabled = enabled
+        self.auto_quarantine_min_confidence = max(0, min(100, int(threshold)))
+
+    def trace_pyhandle_errors(self, error):
+        self._append_log(f"⚠️ Handle trace: {error}")
+
+    def is_rules_loaded(self):
+        return bool(self.rules_loaded)
+
+    def _delayed_monitoring_start(self):
+        QTimer.singleShot(250, self.enable_protection)
+
+    def play_alert_sound(self):
+        self.play_notification_sound()
+
+    def alert_soun_path(self):
+        """Legacy typo-preserved API for backward compatibility."""
+        return getattr(self, 'alert_sound_path', '')
+
+    def _log_detection_internal(self, detection):
+        self.log_detection(detection)
+
+    def is_critical_process(self, process_name):
+        if not process_name:
+            return False
+        return str(process_name).lower() in {p.lower() for p in getattr(self, 'critical_processes', set())}
+
+    def get_scan_priority(self, process_name):
+        if self.is_critical_process(process_name):
+            return 'low'
+        suspicious = ['powershell', 'cmd', 'wscript', 'cscript', 'rundll32']
+        if any(token in str(process_name).lower() for token in suspicious):
+            return 'high'
+        return 'normal'
+
+    def should_scan_process(self, process_name):
+        return not self.is_critical_process(process_name)
+
+    def update_gui(self):
+        self._smart_refresh_processes()
+        self._refresh_quarantine()
+
+    def update_scan_summary(self):
+        if hasattr(self, 'status_message'):
+            self.status_message.setText(
+                f"Scanned: {self.total_processes_scanned} | Threats: {self.threats_found}"
+            )
+
+    def update_scan_progress(self, progress, message='Scanning...'):
+        self._update_scan_progress(int(progress), str(message))
+
+    def process_list_data(self):
+        processes = []
+        for proc in psutil.process_iter(['pid', 'name', 'status']):
+            try:
+                processes.append(proc.info)
+            except Exception:
+                continue
+        return processes
+
+    def load_signatures(self, signature_file=None):
+        """Load legacy hash signature database from text file."""
+        self.signature_db = set()
+        if not signature_file:
+            return False
+        if not os.path.exists(signature_file):
+            return False
+
+        try:
+            with open(signature_file, 'r', encoding='utf-8', errors='ignore') as f:
+                self.signature_db = {line.strip() for line in f if line.strip()}
+            return True
+        except Exception:
+            return False
+
+    def calculate_file_hash(self, filepath):
+        if not filepath or not os.path.exists(filepath):
+            return None
+        import hashlib
+        sha256_hash = hashlib.sha256()
+        try:
+            with open(filepath, 'rb') as f:
+                for chunk in iter(lambda: f.read(4096), b''):
+                    sha256_hash.update(chunk)
+            return sha256_hash.hexdigest()
+        except Exception:
+            return None
+
+    def check_signatures(self, filepath):
+        file_hash = self.calculate_file_hash(filepath)
+        if not file_hash:
+            return False
+        return file_hash in getattr(self, 'signature_db', set())
+
+    def scan_file(self, filepath):
+        """Legacy boolean file scan against loaded signatures."""
+        return self.check_signatures(filepath)
+
+    def log_detection(self, detection):
+        normalized = self.create_detection_item(detection)
+        if 'pid' not in normalized:
+            normalized['pid'] = normalized.get('process_pid', '')
+        self._add_detection(normalized)
+
+    def remove_selected_detection(self):
+        self._delete_selected_detections()
+
+    def quarantine_memory_region(self):
+        self._append_log("⚠️ Memory-region quarantine is not supported in the PySide UI; use process quarantine actions.")
+
+    def terminate_selected_region(self):
+        self._append_log("⚠️ Region-level termination is not supported in this UI build.")
+
+    def terminate_selected_process(self):
+        self._terminate_process()
+
+    def remove_selected(self):
+        self.delete_selected()
+
+    def quarantine_selected_memory(self):
+        self.quarantine_selected()
+
+    def remove_file(self, file_path=None):
+        if file_path and os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+                self._append_log(f"🗑️ Removed file: {file_path}")
+                return True
+            except Exception as e:
+                self._append_log(f"❌ Failed to remove file {file_path}: {e}")
+                return False
+        self.remove_infected_file()
+        return True
+
+    def kill_process(self, pid):
+        try:
+            psutil.Process(int(pid)).terminate()
+            return True
+        except Exception as e:
+            self._append_log(f"❌ Failed to terminate PID {pid}: {e}")
+            return False
+
+    def kill_selected_process(self):
+        self._terminate_process()
+
+    def restore_process(self, pid):
+        try:
+            psutil.Process(int(pid)).resume()
+            return True
+        except Exception as e:
+            self._append_log(f"❌ Failed to restore PID {pid}: {e}")
+            return False
+
+    def remove_quarantined(self):
+        self._delete_quarantined()
+
+    def create_test_detection(self):
+        test_detection = {
+            'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            'type': 'Test Detection',
+            'name': 'ofsp_test_payload.exe',
+            'pid': 1337,
+            'severity': 'Medium',
+            'description': 'Compatibility test detection generated manually'
+        }
+        self._add_detection(test_detection)
+
+    def update_process_list(self):
+        self._refresh_processes()
+
+    def load_rules_async(self):
+        threading.Thread(target=self._reload_yara, daemon=True).start()
+
+    def start_scan(self, mode='quick'):
+        if str(mode).lower() == 'deep':
+            self.start_deep_scan()
+        else:
+            self.start_quick_scan()
+
+    def handle_detection_alert(self, detection):
+        self._add_detection(self.create_detection_item(detection))
+
+    def update_detection_trees(self):
+        """Legacy bridge for tree/table refresh."""
+        if hasattr(self, 'detections_table'):
+            self.detections_table.viewport().update()
+
+    def scanning_loop(self, mode='quick'):
+        self.start_scan(mode)
+
+    def log_suspicious_region(self, process, address, details='Suspicious memory region'):
+        detection = {
+            'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            'type': 'Suspicious Memory Region',
+            'name': process,
+            'pid': '',
+            'severity': 'High',
+            'description': f"{details} @ {address}"
+        }
+        self._add_detection(detection)
+
+    def display_threat_details(self):
+        self._update_threat_details()
+
+    def run_quick_scan(self):
+        self.start_quick_scan()
+
+    def run_deep_scan(self):
+        self.start_deep_scan()
+
+    def play_notification_sound(self):
+        """Play an alert sound with platform-safe fallbacks."""
+        try:
+            if sys.platform == 'win32':
+                import winsound
+                winsound.PlaySound('SystemAsterisk', winsound.SND_ALIAS)
+                return
+        except Exception:
+            pass
+
+        try:
+            QApplication.beep()
+        except Exception:
+            pass
+
+    def cleanup_scan(self):
+        self.scanning = False
+        self._update_scan_ui_end()
+
+    def clear_ui_elements(self):
+        self._clear_detections()
+        if hasattr(self, 'scan_results_table'):
+            self.scan_results_table.setRowCount(0)
+        if hasattr(self, 'fs_results_table'):
+            self.fs_results_table.setRowCount(0)
+        if hasattr(self, 'memory_output'):
+            self.memory_output.clear()
+        if hasattr(self, 'log_output'):
+            self.log_output.clear()
+
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     ui = OrbitalStationUI()
