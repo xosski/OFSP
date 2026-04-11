@@ -601,7 +601,12 @@ class OrbitalStationUI(QMainWindow):
         QApplication.processEvents()
         
         # Initialize backend asynchronously to avoid freezing UI on startup.
-        self._start_backend_initialization()
+        if os.environ.get("ORBITAL_UI_SKIP_BACKEND_INIT") == "1":
+            self.status_label.setText("Backend Init Skipped")
+            self.rules_label.setText("Rules: Deferred")
+            self.status_message.setText("Backend initialization disabled for this session")
+        else:
+            self._start_backend_initialization()
         
     def _init_backend(self):
         """Initialize all backend components"""
@@ -864,6 +869,13 @@ class OrbitalStationUI(QMainWindow):
             if self.scan_worker and self.scan_worker.isRunning():
                 self.scan_worker.stop()
                 self.scan_worker.wait(3000)
+        except Exception:
+            pass
+
+        try:
+            if self.fs_scan_worker and self.fs_scan_worker.isRunning():
+                self.fs_scan_worker.stop()
+                self.fs_scan_worker.wait(3000)
         except Exception:
             pass
 
@@ -2030,12 +2042,19 @@ class OrbitalStationUI(QMainWindow):
                     border-color: #106ebe;
                 }
             """)
+
+        self.scan_executables.clicked.connect(self._sync_filetype_filter_buttons)
+        self.scan_scripts.clicked.connect(self._sync_filetype_filter_buttons)
+        self.scan_documents.clicked.connect(self._sync_filetype_filter_buttons)
+        self.scan_all_files.clicked.connect(self._sync_filetype_filter_buttons)
         
         filter_layout.addWidget(self.scan_executables)
         filter_layout.addWidget(self.scan_scripts)
         filter_layout.addWidget(self.scan_documents)
         filter_layout.addWidget(self.scan_all_files)
         options_layout.addLayout(filter_layout)
+
+        self._sync_filetype_filter_buttons()
         
         # Advanced options
         advanced_layout = QHBoxLayout()
@@ -3747,6 +3766,24 @@ class OrbitalStationUI(QMainWindow):
         for checkbox in self.drive_checkboxes.values():
             checkbox.setChecked(False)
     
+    def _sync_filetype_filter_buttons(self):
+        """Keep file-type scan filters in a consistent and predictable state."""
+        specific_filters = [self.scan_executables, self.scan_scripts, self.scan_documents]
+        sender = self.sender()
+
+        if sender is self.scan_all_files and self.scan_all_files.isChecked():
+            for btn in specific_filters:
+                btn.setChecked(False)
+            return
+
+        if any(btn.isChecked() for btn in specific_filters):
+            self.scan_all_files.setChecked(False)
+            return
+
+        # Never leave the scanner with zero file type categories selected.
+        if not self.scan_all_files.isChecked():
+            self.scan_executables.setChecked(True)
+
     def _start_filesystem_quick_scan(self):
         """Start a quick filesystem scan of critical locations"""
         if self.fs_scanning:
