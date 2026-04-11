@@ -1,0 +1,21 @@
+2026-04-10 22:15:07,031 - INFO - main.py:23 - Starting Orbital Station application
+2026-04-10 22:15:07,033 - WARNING - main.py:27 - Application not running with administrator privileges
+2026-04-10 22:15:07,033 - INFO - main.py:28 - Requesting elevation...
+2026-04-10 22:15:09,218 - INFO - main.py:23 - Starting Orbital Station application
+2026-04-10 22:15:09,220 - INFO - main.py:41 - Running with administrator privileges
+2026-04-10 22:15:11,994 - INFO - HadesAI.py:347 - Hades AI Core initialized...
+2026-04-10 22:15:11,998 - INFO - main.py:49 - Initializing PySide6 GUI
+2026-04-10 22:15:12,064 - DEBUG - ShellCodeMagic.py:3247 - Capstone not available, trying distorm3
+2026-04-10 22:15:12,065 - DEBUG - ShellCodeMagic.py:3256 - No disassembly engine available. Limited functionality.
+2026-04-10 22:15:12,812 - INFO - main.py:54 - Starting PySide6 event loop
+2026-04-10 22:15:12,816 - DEBUG - Memory.py:246 - Attempting to enable SeDebugPrivilege
+2026-04-10 22:15:12,817 - INFO - Memory.py:264 - SeDebugPrivilege enabled successfully
+2026-04-10 22:15:12,817 - DEBUG - Memory.py:246 - Attempting to enable SeDebugPrivilege
+2026-04-10 22:15:12,817 - INFO - Memory.py:264 - SeDebugPrivilege enabled successfully
+2026-04-10 22:15:12,817 - INFO - Memory.py:89 - MemoryScanner
+2026-04-10 22:15:12,819 - INFO - YaraRuleManager.py:78 - YARA rule directories created successfully
+2026-04-10 22:15:12,820 - DEBUG - YaraRuleManager.py:114 - === YaraRuleManager Initialization ===
+2026-04-10 22:15:12,820 - DEBUG - YaraRuleManager.py:115 - Rules directory: yara_rules
+2026-04-10 22:15:12,827 - INFO - YaraRuleManager.py:123 - Initializing YARA rules with basic detection patterns...
+2026-04-10 22:15:13,615 - ERROR - YaraRuleManager.py:1276 - Failed to compile YARA rules: yara_rules\memory_rules\neo23x0_yara_mixed_ext_vars.yar(385): undefined identifier "owner"
+2026-04-10 22:15:14,167 - ERROR - YaraRuleManager.py:1321 - Error in rule file 'memory_neo23x0_yara_mixed_ext_vars' at yara_rules\memory_rules\neo23x0_yara_mixed_ext_vars.yar: yara_rules\memory_rules\neo23x0_yara_mixed_ext_vars.yar(385): undefined identifier "owner"

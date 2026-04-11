@@ -3,7 +3,7 @@
         meta:
             description = "Basic detection rule for memory"
             author = "YaraRuleManager"
-            created = "2026-04-03"
+            created = "2026-04-10"
         
         strings:
             $str1 = "VirtualAlloc" nocase

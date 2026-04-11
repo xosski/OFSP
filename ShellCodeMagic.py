@@ -2083,6 +2083,37 @@ class ShellCodeTome:
             return [self._json_restore(v) for v in value]
         return value
 
+    def _decode_pattern_blob(self, blob_value):
+        """Decode persisted pattern_data blob from bytes/str into a dict."""
+        if not blob_value:
+            return {}
+
+        try:
+            if isinstance(blob_value, (bytes, bytearray)):
+                loaded = json.loads(blob_value.decode('utf-8', errors='ignore'))
+            elif isinstance(blob_value, str):
+                loaded = json.loads(blob_value)
+            elif isinstance(blob_value, dict):
+                loaded = blob_value
+            else:
+                return {}
+            return self._json_restore(loaded) if isinstance(loaded, dict) else {}
+        except Exception:
+            return {}
+
+    def _decode_metadata_blob(self, metadata_value):
+        """Decode persisted metadata JSON into a dict."""
+        if not metadata_value:
+            return {}
+        try:
+            if isinstance(metadata_value, str):
+                return self._json_restore(json.loads(metadata_value))
+            if isinstance(metadata_value, dict):
+                return self._json_restore(metadata_value)
+        except Exception:
+            return {}
+        return {}
+
     def _build_spell_id(self, entry):
         """Build a stable spell ID so repeated encounters update the same spell."""
         existing_id = entry.get('spell_id')
@@ -2656,8 +2687,9 @@ class ShellCodeTome:
             if category:
                 query = '''
                     SELECT id, spell_name, category, discovery_date, process_name, 
-                           confidence_level, power_rating, times_encountered, last_seen
-                    FROM ancient_spells 
+                           confidence_level, power_rating, times_encountered, last_seen,
+                           memory_address, entropy, disassembly, metadata, pattern_data
+                    FROM ancient_spells
                     WHERE category = ?
                     ORDER BY discovery_date DESC
                     LIMIT ? OFFSET ?
@@ -2666,16 +2698,19 @@ class ShellCodeTome:
             else:
                 query = '''
                     SELECT id, spell_name, category, discovery_date, process_name, 
-                           confidence_level, power_rating, times_encountered, last_seen
-                    FROM ancient_spells 
+                           confidence_level, power_rating, times_encountered, last_seen,
+                           memory_address, entropy, disassembly, metadata, pattern_data
+                    FROM ancient_spells
                     ORDER BY discovery_date DESC
                     LIMIT ? OFFSET ?
                 '''
                 cursor.execute(query, (limit, offset))
-            
+
             spells = []
             for row in cursor.fetchall():
-                spells.append({
+                metadata = self._decode_metadata_blob(row[12])
+                pattern_data = self._decode_pattern_blob(row[13])
+                spell_record = {
                     'id': row[0],
                     'name': row[1],
                     'category': row[2],
@@ -2684,8 +2719,33 @@ class ShellCodeTome:
                     'confidence': row[5],
                     'power': row[6],
                     'encounters': row[7],
-                    'last_seen': row[8]
-                })
+                    'last_seen': row[8],
+                    'memory_address': row[9],
+                    'location': row[9],
+                    'entropy': row[10],
+                    'disassembly': row[11] or '',
+                    'metadata': metadata,
+                    'pattern_data': pattern_data,
+                    'shellcode': pattern_data.get('shellcode') or b'',
+                    'patterns': pattern_data.get('patterns') or metadata.get('patterns') or [],
+                    'commands': pattern_data.get('commands') or metadata.get('commands') or [],
+                    'findings': pattern_data.get('findings') or metadata.get('findings') or [],
+                    'details': pattern_data.get('details') or metadata.get('details') or '',
+                    'size': (
+                        pattern_data.get('shellcode_size')
+                        or metadata.get('shellcode_size')
+                        or pattern_data.get('size')
+                        or 0
+                    ),
+                }
+
+                if not spell_record['shellcode'] and metadata.get('shellcode_hex'):
+                    try:
+                        spell_record['shellcode'] = bytes.fromhex(metadata.get('shellcode_hex'))
+                    except ValueError:
+                        spell_record['shellcode'] = b''
+
+                spells.append(spell_record)
             
             conn.close()
             return spells
@@ -2706,11 +2766,13 @@ class ShellCodeTome:
             
             row = cursor.fetchone()
             if row:
+                pattern_data = self._decode_pattern_blob(row[3])
+                metadata = self._decode_metadata_blob(row[13])
                 spell_details = {
                     'id': row[0],
                     'category': row[1],
                     'spell_name': row[2],
-                    'pattern_data': self._json_restore(json.loads(row[3].decode('utf-8'))),
+                    'pattern_data': pattern_data,
                     'discovery_date': row[4],
                     'process_name': row[5],
                     'memory_address': row[6],
@@ -2720,7 +2782,7 @@ class ShellCodeTome:
                     'times_encountered': row[10],
                     'last_seen': row[11],
                     'disassembly': row[12],
-                    'metadata': self._json_restore(json.loads(row[13])) if row[13] else {}
+                    'metadata': metadata
                 }
                 
                 conn.close()

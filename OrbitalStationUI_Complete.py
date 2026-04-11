@@ -917,6 +917,112 @@ class OrbitalStationUI(QMainWindow):
 
         return file_path
 
+    def _set_table_status(self, table, row, status, color_hex=None, status_column=6):
+        """Safely set status text/color in a table row without risking index errors."""
+        if not table or row < 0:
+            return
+        if status_column >= table.columnCount():
+            status_column = table.columnCount() - 1
+            if status_column < 0:
+                return
+
+        status_item = QTableWidgetItem(str(status))
+        if color_hex:
+            status_item.setBackground(QColor(color_hex))
+        table.setItem(row, status_column, status_item)
+
+    def _extract_pid_from_scan_result_row(self, row):
+        """Extract PID from Scan Results row fields when the row represents a process finding."""
+        try:
+            name_item = self.scan_results_table.item(row, 0)
+            type_item = self.scan_results_table.item(row, 2)
+            path_item = self.scan_results_table.item(row, 1)
+            details_item = self.scan_results_table.item(row, 5)
+            candidates = [
+                name_item.text() if name_item else "",
+                type_item.text() if type_item else "",
+                path_item.text() if path_item else "",
+                details_item.text() if details_item else "",
+            ]
+
+            for candidate in candidates:
+                if not candidate:
+                    continue
+                candidate_text = str(candidate)
+                match = re.search(r'\bpid\s*[:=]?\s*(\d+)\b', str(candidate), re.IGNORECASE)
+                if match:
+                    return int(match.group(1))
+
+                # Also support common formats like "(1234)" or "Process 1234"
+                number_match = re.search(r'\((\d{2,7})\)', candidate_text)
+                if number_match:
+                    return int(number_match.group(1))
+
+                if candidate_text.strip().isdigit() and len(candidate_text.strip()) <= 7:
+                    return int(candidate_text.strip())
+
+                prefixed = str(candidate).strip().lower()
+                if prefixed.startswith('pid:'):
+                    try:
+                        return int(str(candidate).split(':', 1)[1].strip())
+                    except (TypeError, ValueError):
+                        continue
+        except Exception:
+            return None
+        return None
+
+    def _quarantine_process_pid(self, pid, process_name, details_text=""):
+        """Quarantine process by suspending it and storing context when possible."""
+        if pid is None:
+            return False, "No PID available"
+
+        if self.is_critical_process(process_name):
+            return False, f"Protected critical process: {process_name}"
+
+        try:
+            proc = psutil.Process(pid)
+            proc.suspend()
+
+            if getattr(self, 'threat_quarantine', None) and hasattr(self.threat_quarantine, 'quarantine_process'):
+                try:
+                    self.threat_quarantine.quarantine_enabled = True
+                    self.threat_quarantine.quarantine_process(
+                        pid,
+                        {
+                            'Name': process_name,
+                            'Path': proc.exe() if hasattr(proc, 'exe') else '',
+                        },
+                        {'details': details_text or 'Suspended from Scan Results action'}
+                    )
+                except Exception:
+                    pass
+
+            return True, f"Suspended process {process_name} (PID: {pid})"
+        except Exception as e:
+            return False, f"Failed to quarantine process PID {pid}: {str(e)}"
+
+    def _delete_process_pid(self, pid, process_name):
+        """Delete process entry by terminating the live process."""
+        if pid is None:
+            return False, "No PID available"
+
+        if self.is_critical_process(process_name):
+            return False, f"Protected critical process: {process_name}"
+
+        try:
+            proc = psutil.Process(pid)
+            proc.terminate()
+            try:
+                proc.wait(timeout=3)
+            except Exception:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+            return True, f"Terminated process {process_name} (PID: {pid})"
+        except Exception as e:
+            return False, f"Failed to terminate process PID {pid}: {str(e)}"
+
     def _is_scan_results_tab_active(self):
         """Return True when the dedicated Scan Results tab is active."""
         return hasattr(self, 'scan_results_tab') and self.tabs.currentWidget() is self.scan_results_tab
@@ -3720,7 +3826,9 @@ class OrbitalStationUI(QMainWindow):
         
         quarantined_count = 0
         protected_count = 0
-        skipped_count = 0
+        skipped_no_target_count = 0
+        failed_process_count = 0
+        missing_file_count = 0
         
         for row in sorted(selected_rows, reverse=True):
             file_path = self._resolve_actionable_file_path(self.fs_results_table, row, 1)
@@ -3792,6 +3900,9 @@ class OrbitalStationUI(QMainWindow):
                         self.fs_results_table.setItem(row, 4, QTableWidgetItem("Deleted"))
                         self.fs_results_table.item(row, 4).setBackground(QColor('#cc0000'))
                         deleted_count += 1
+                    else:
+                        skipped_count += 1
+                        self.log_output.append(f"⚠️ File missing during delete operation: {file_path}")
                 except Exception as e:
                     self.log_output.append(f"Error deleting {file_path}: {str(e)}")
             
@@ -4331,11 +4442,33 @@ class OrbitalStationUI(QMainWindow):
         
         for row in sorted(selected_rows, reverse=True):
             file_path = self._resolve_actionable_file_path(self.scan_results_table, row, 1)
+            threat_name_item = self.scan_results_table.item(row, 0)
+            threat_path_item = self.scan_results_table.item(row, 1)
+            details_item = self.scan_results_table.item(row, 5)
+            threat_name = threat_name_item.text() if threat_name_item else "Unknown"
+            threat_path = threat_path_item.text() if threat_path_item else ""
+            details_text = details_item.text() if details_item else ""
+
+            # Process-only detection rows have PID references instead of filesystem paths.
             if not file_path:
-                skipped_count += 1
-                self.log_output.append(f"⚠️ Skipping quarantine for non-file threat row {row + 1}")
+                pid = self._extract_pid_from_scan_result_row(row)
+                if pid is None:
+                    skipped_no_target_count += 1
+                    self.log_output.append(
+                        f"⚠️ Skipping quarantine for row {row + 1}: no filesystem path and no PID found "
+                        f"(Path='{threat_path}', Threat='{threat_name}')"
+                    )
+                    continue
+
+                ok, msg = self._quarantine_process_pid(pid, threat_name, details_text)
+                self.log_output.append(("🔒 " if ok else "⚠️ ") + msg)
+                if ok:
+                    self._set_table_status(self.scan_results_table, row, "Process Quarantined", '#ffcc00', status_column=6)
+                    quarantined_count += 1
+                else:
+                    failed_process_count += 1
                 continue
-            self.threat_name = self.scan_results_table.item(row, 0).text()
+            self.threat_name = threat_name
 
             # Safety check - protect system files
             if self._is_system_file_protected(file_path):
@@ -4346,9 +4479,10 @@ class OrbitalStationUI(QMainWindow):
                 # Perform quarantine
                 if self._quarantine_file(file_path):
                     # Update status in table
-                    self.scan_results_table.setItem(row, 6, QTableWidgetItem("Quarantined"))
-                    self.scan_results_table.item(row, 6).setBackground(QColor('#ffcc00'))
+                    self._set_table_status(self.scan_results_table, row, "Quarantined", '#ffcc00', status_column=6)
                     quarantined_count += 1
+                else:
+                    missing_file_count += 1
                     
             except Exception as e:
                 self.log_output.append(f"Error quarantining {file_path}: {str(e)}")
@@ -4357,8 +4491,12 @@ class OrbitalStationUI(QMainWindow):
         message = f"Quarantined {quarantined_count} threats"
         if protected_count > 0:
             message += f"\n{protected_count} system files were protected from quarantine"
-        if skipped_count > 0:
-            message += f"\n{skipped_count} entries were skipped because they do not reference filesystem paths"
+        if skipped_no_target_count > 0:
+            message += f"\n{skipped_no_target_count} entries skipped: no actionable file path or PID"
+        if failed_process_count > 0:
+            message += f"\n{failed_process_count} process actions failed (see log for details)"
+        if missing_file_count > 0:
+            message += f"\n{missing_file_count} file targets were missing/unavailable"
 
         QMessageBox.information(self, "Quarantine Complete", message)
     
@@ -4386,13 +4524,33 @@ class OrbitalStationUI(QMainWindow):
         
         deleted_count = 0
         protected_count = 0
-        skipped_count = 0
+        skipped_no_target_count = 0
+        failed_process_count = 0
+        missing_file_count = 0
         
         for row in sorted(selected_rows, reverse=True):
             file_path = self._resolve_actionable_file_path(self.scan_results_table, row, 1)
+            threat_name_item = self.scan_results_table.item(row, 0)
+            threat_path_item = self.scan_results_table.item(row, 1)
+            threat_name = threat_name_item.text() if threat_name_item else "Unknown"
+            threat_path = threat_path_item.text() if threat_path_item else ""
             if not file_path:
-                skipped_count += 1
-                self.log_output.append(f"⚠️ Skipping delete for non-file threat row {row + 1}")
+                pid = self._extract_pid_from_scan_result_row(row)
+                if pid is None:
+                    skipped_no_target_count += 1
+                    self.log_output.append(
+                        f"⚠️ Skipping delete for row {row + 1}: no filesystem path and no PID found "
+                        f"(Path='{threat_path}', Threat='{threat_name}')"
+                    )
+                    continue
+
+                ok, msg = self._delete_process_pid(pid, threat_name)
+                self.log_output.append(("🗑️ " if ok else "⚠️ ") + msg)
+                if ok:
+                    self._set_table_status(self.scan_results_table, row, "Process Terminated", '#cc0000', status_column=6)
+                    deleted_count += 1
+                else:
+                    failed_process_count += 1
                 continue
 
             is_system_file_protected = self._is_system_file_protected(file_path)
@@ -4406,10 +4564,12 @@ class OrbitalStationUI(QMainWindow):
                 if os.path.exists(file_path):
                     os.remove(file_path)
                     # Update status in table
-                    self.scan_results_table.setItem(row, 6, QTableWidgetItem("Deleted"))
-                    self.scan_results_table.item(row, 6).setBackground(QColor('#cc0000'))
+                    self._set_table_status(self.scan_results_table, row, "Deleted", '#cc0000', status_column=6)
                     deleted_count += 1
-                    
+                else:
+                    missing_file_count += 1
+                    self.log_output.append(f"⚠️ File missing during delete operation: {file_path}")
+
             except Exception as e:
                 self.log_output.append(f"Error deleting {file_path}: {str(e)}")
         
@@ -4417,8 +4577,12 @@ class OrbitalStationUI(QMainWindow):
         message = f"Deleted {deleted_count} threats"
         if protected_count > 0:
             message += f"\n{protected_count} system files were protected from deletion"
-        if skipped_count > 0:
-            message += f"\n{skipped_count} entries were skipped because they do not reference filesystem paths"
+        if skipped_no_target_count > 0:
+            message += f"\n{skipped_no_target_count} entries skipped: no actionable file path or PID"
+        if failed_process_count > 0:
+            message += f"\n{failed_process_count} process actions failed (see log for details)"
+        if missing_file_count > 0:
+            message += f"\n{missing_file_count} file targets were missing/unavailable"
         
         QMessageBox.information(self, "Deletion Complete", message)
     
@@ -4471,8 +4635,7 @@ class OrbitalStationUI(QMainWindow):
             try:
                 # Add to whitelist (implement whitelist functionality)
                 # For now, just update the status
-                self.scan_results_table.setItem(row, 6, QTableWidgetItem("Whitelisted"))
-                self.scan_results_table.item(row, 6).setBackground(QColor('#00aa00'))
+                self._set_table_status(self.scan_results_table, row, "Whitelisted", '#00aa00', status_column=6)
                 whitelisted_count += 1
                     
             except Exception as e:
@@ -4747,8 +4910,7 @@ class OrbitalStationUI(QMainWindow):
                 if reply == QMessageBox.Yes:
                     if self._quarantine_file(file_path):
                         # Update status in table
-                        self.scan_results_table.setItem(current_row, 6, QTableWidgetItem("Quarantined"))
-                        self.scan_results_table.item(current_row, 6).setBackground(QColor('#ffcc00'))
+                        self._set_table_status(self.scan_results_table, current_row, "Quarantined", '#ffcc00', status_column=6)
             elif self._is_filesystem_tab_active():
                 current_row = self.fs_results_table.currentRow()
                 if current_row < 0:
@@ -4769,8 +4931,7 @@ class OrbitalStationUI(QMainWindow):
                 if reply == QMessageBox.Yes:
                     if self._quarantine_file(file_path):
                         # Update status in table
-                        self.fs_results_table.setItem(current_row, 4, QTableWidgetItem("Quarantined"))
-                        self.fs_results_table.item(current_row, 4).setBackground(QColor('#ffcc00'))
+                        self._set_table_status(self.fs_results_table, current_row, "Quarantined", '#ffcc00', status_column=4)
             elif self.scan_results_table.selectedItems():
                 self._quarantine_selected_results()
             elif self.fs_results_table.selectedItems():

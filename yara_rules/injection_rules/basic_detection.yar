@@ -3,7 +3,7 @@
         meta:
             description = "Basic detection rule for injection"
             author = "YaraRuleManager"
-            created = "2026-04-03"
+            created = "2026-04-10"
         
         strings:
             $str1 = "CreateRemoteThread" nocase
