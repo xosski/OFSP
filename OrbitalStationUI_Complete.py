@@ -1967,6 +1967,7 @@ class OrbitalStationUI(QMainWindow):
             if os.path.exists(drive_path):
                 checkbox = QPushButton(f"Drive {drive_letter}:")
                 checkbox.setCheckable(True)
+                checkbox.clicked.connect(self._on_drive_selection_changed)
                 checkbox.setStyleSheet("""
                     QPushButton {
                         text-align: left;
@@ -2087,6 +2088,11 @@ class OrbitalStationUI(QMainWindow):
                     border-color: #106ebe;
                 }
             """)
+
+        self.deep_scan_archives.clicked.connect(self._on_filesystem_option_toggled)
+        self.scan_network_drives.clicked.connect(self._on_filesystem_option_toggled)
+        self.heuristic_analysis.clicked.connect(self._on_filesystem_option_toggled)
+        self.scan_browser_artifacts.clicked.connect(self._on_filesystem_option_toggled)
         
         advanced_layout.addWidget(self.deep_scan_archives)
         advanced_layout.addWidget(self.scan_network_drives)
@@ -3783,6 +3789,23 @@ class OrbitalStationUI(QMainWindow):
         # Never leave the scanner with zero file type categories selected.
         if not self.scan_all_files.isChecked():
             self.scan_executables.setChecked(True)
+
+    def _on_drive_selection_changed(self):
+        """Update status text when drive scan targets change."""
+        selected_count = sum(1 for checkbox in self.drive_checkboxes.values() if checkbox.isChecked())
+        self.status_message.setText(f"Filesystem targets: {selected_count} drive(s) selected")
+
+    def _on_filesystem_option_toggled(self):
+        """Reflect filesystem scan option changes in the status line and logs."""
+        sender = self.sender()
+        if not isinstance(sender, QPushButton):
+            return
+
+        state = "enabled" if sender.isChecked() else "disabled"
+        self.status_message.setText(f"{sender.text()} {state}")
+
+        if hasattr(self, 'log_output') and self.log_output is not None:
+            self.log_output.append(f"Filesystem option {state}: {sender.text()}")
 
     def _start_filesystem_quick_scan(self):
         """Start a quick filesystem scan of critical locations"""
